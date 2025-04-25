@@ -828,48 +828,6 @@ const TeacherClassDetailPage = () => {
       student.email.toLowerCase().includes(searchStudent.toLowerCase())
   );
 
-  // Hàm để lấy thông tin đầy đủ của phòng học một cách đáng tin cậy từ state
-  const getRoomFullInfo = (roomInput) => {
-    // 1. Luôn kiểm tra xem state 'rooms' đã sẵn sàng chưa
-    if (!rooms || rooms.length === 0) {
-      console.log("State rooms chưa sẵn sàng hoặc rỗng", rooms);
-      return "Đang tải..."; // Rút gọn thông báo tải
-    }
-
-    // 2. Xác định ID phòng từ input (string hoặc object)
-    let roomId = null;
-    if (typeof roomInput === "string") {
-      roomId = roomInput;
-    } else if (
-      typeof roomInput === "object" &&
-      roomInput !== null &&
-      roomInput._id
-    ) {
-      roomId = roomInput._id;
-    } else {
-      // Nếu input không hợp lệ, trả về lỗi
-      console.warn("[DEBUG] getRoomFullInfo: Invalid roomInput", roomInput);
-      return "Lỗi"; // Rút gọn thông báo lỗi
-    }
-
-    // 3. Tìm phòng trong state 'rooms' bằng ID
-    const foundRoom = rooms.find((r) => r._id === roomId);
-    console.log("Tìm phòng với ID:", roomId, "Kết quả:", foundRoom);
-
-    // 4. Xử lý kết quả tìm kiếm
-    if (!foundRoom) {
-      // Có thể phòng này không tồn tại trong danh sách hoặc danh sách chưa đầy đủ
-      // Trả về ID rút gọn để debug hoặc thông báo không tìm thấy
-      return `P. ${roomId?.slice(-4) || "?"}`; // Chỉ hiển thị 4 ký tự cuối ID nếu không tìm thấy
-    }
-
-    // 5. Lấy thông tin từ 'foundRoom' (đối tượng đã được populate từ state)
-    const roomName = foundRoom.room_number || "Không xác định";
-
-    // 6. Trả về chỉ tên phòng
-    return `${roomName}`;
-  };
-
   if (isLoading) {
     return (
       <Box
@@ -1201,10 +1159,14 @@ const TeacherClassDetailPage = () => {
                         </TableCell>
                         <TableCell>
                           {session.room ? (
-                            // Luôn sử dụng getRoomFullInfo để đảm bảo nhất quán
                             <Tooltip title="Thông tin phòng học">
                               <Typography variant="body2">
-                                {getRoomFullInfo(session.room)}
+                                {session.room.room_number || "Không xác định"} -{" "}
+                                {session.room.building_id?.name ||
+                                  "Không xác định"}{" "}
+                                -{" "}
+                                {session.room.building_id?.campus_id?.name ||
+                                  "Không xác định"}
                               </Typography>
                             </Tooltip>
                           ) : (
@@ -1400,8 +1362,9 @@ const TeacherClassDetailPage = () => {
                       rooms.map((room) => (
                         <MenuItem key={room._id} value={room._id}>
                           {room.room_number || "Không xác định"} -{" "}
-                          {room.building?.name || "Không xác định"} -{" "}
-                          {room.building?.campus?.name || "Không xác định"}
+                          {room.building_id?.name || "Không xác định"} -{" "}
+                          {room.building_id?.campus_id?.name ||
+                            "Không xác định"}
                         </MenuItem>
                       ))}
                   </Select>
