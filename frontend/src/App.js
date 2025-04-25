@@ -1,0 +1,168 @@
+import React, { useEffect } from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
+import { useSelector } from "react-redux";
+
+// Pages
+import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
+import RoleSelectionPage from "./pages/RoleSelectionPage";
+import DashboardPage from "./pages/DashboardPage";
+import FaceRegistrationPage from "./pages/FaceRegistrationPage";
+import GoogleRedirectPage from "./pages/GoogleRedirectPage";
+import PendingApprovalPage from "./pages/PendingApprovalPage";
+import CompleteRegistrationPage from "./pages/CompleteRegistrationPage";
+import ProfilePage from "./pages/ProfilePage";
+
+// Student Pages
+import StudentClassesPage from "./pages/student/ClassesPage";
+import StudentAttendancePage from "./pages/student/AttendancePage";
+
+// Teacher Pages
+import TeacherClassesPage from "./pages/teacher/ClassesPage";
+import TeacherClassDetailPage from "./pages/teacher/ClassDetailPage";
+import TeacherAttendancePage from "./pages/teacher/AttendancePage";
+import TeacherMainClassPage from "./pages/teacher/MainClassPage";
+import CameraTestPage from "./pages/teacher/CameraTestPage";
+
+// Admin Pages
+import AdminUsersPage from "./pages/admin/UsersPage";
+import AdminClassesPage from "./pages/admin/ClassesPage";
+import AdminDepartmentsPage from "./pages/admin/DepartmentsPage";
+import AdminFacilitiesPage from "./pages/admin/FacilitiesPage";
+import AdminSemestersPage from "./pages/admin/SemestersPage";
+import AdminSubjectsPage from "./pages/admin/SubjectsPage";
+import TestPage from "./pages/admin/TestPage";
+
+// Layouts
+import MainLayout from "./layouts/MainLayout";
+import MinimalLayout from "./layouts/MinimalLayout";
+
+// Auth check
+import ProtectedRoute from "./components/ProtectedRoute";
+
+const App = () => {
+  const { isAuthenticated, user } = useSelector((state) => state.auth);
+
+  // Hàm kiểm tra vai trò
+  const hasRole = (role) => {
+    if (!user) return false;
+    return user.role === role;
+  };
+
+  return (
+    <Routes>
+      {/* Public Routes */}
+      <Route path="/" element={<MinimalLayout />}>
+        <Route index element={<Navigate to="/login" replace />} />
+        <Route path="login" element={<LoginPage />} />
+        <Route path="register" element={<RegisterPage />} />
+        <Route path="role-selection" element={<RoleSelectionPage />} />
+
+        {/* Routes cho đăng nhập Google */}
+        <Route path="login/success" element={<GoogleRedirectPage />} />
+        <Route path="login/error" element={<GoogleRedirectPage />} />
+
+        {/* Routes cho đăng ký và phê duyệt */}
+        <Route
+          path="complete-registration"
+          element={<CompleteRegistrationPage />}
+        />
+        <Route path="pending-approval" element={<PendingApprovalPage />} />
+      </Route>
+
+      {/* Protected Routes */}
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <MainLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="profile" element={<ProfilePage />} />
+        <Route path="register-face" element={<FaceRegistrationPage />} />
+
+        {/* Student Routes */}
+        <Route path="student">
+          <Route
+            path="classes"
+            element={
+              <ProtectedRoute roles={["student"]}>
+                <StudentClassesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="attendance/:classId"
+            element={
+              <ProtectedRoute roles={["student"]}>
+                <StudentAttendancePage />
+              </ProtectedRoute>
+            }
+          />
+        </Route>
+
+        {/* Teacher Routes */}
+        <Route path="teacher">
+          <Route
+            path="classes"
+            element={
+              <ProtectedRoute roles={["teacher"]}>
+                <TeacherClassesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="classes/:classId"
+            element={
+              <ProtectedRoute roles={["teacher"]}>
+                <TeacherClassDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="attendance/:classId/:sessionId"
+            element={
+              <ProtectedRoute roles={["teacher"]}>
+                <TeacherAttendancePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="main-class"
+            element={
+              <ProtectedRoute roles={["teacher"]}>
+                <TeacherMainClassPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="camera-test"
+            element={
+              <ProtectedRoute roles={["teacher"]}>
+                <CameraTestPage />
+              </ProtectedRoute>
+            }
+          />
+        </Route>
+
+        {/* Admin Routes */}
+        <Route path="admin">
+          <Route path="users" element={<AdminUsersPage />} />
+          <Route path="classes" element={<AdminClassesPage />} />
+          <Route path="departments" element={<AdminDepartmentsPage />} />
+          <Route path="semesters" element={<AdminSemestersPage />} />
+          <Route path="subjects" element={<AdminSubjectsPage />} />
+          <Route path="facilities" element={<AdminFacilitiesPage />} />
+          <Route path="test" element={<TestPage />} />
+        </Route>
+      </Route>
+
+      {/* Not Found Route */}
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
+  );
+};
+
+export default App;
