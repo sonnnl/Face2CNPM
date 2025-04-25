@@ -130,74 +130,31 @@ const TeacherClassDetailPage = () => {
   // Thêm hàm fetch danh sách phòng học
   const fetchRooms = async () => {
     try {
-      const response = await axios.get(`${API_URL}/facilities/rooms`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      // Fetch rooms (backend now sends populated data)
+      const response = await axios.get(
+        `${API_URL}/facilities/rooms?limit=1000`,
+        {
+          // limit=1000 might need pagination later
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      console.log("Dữ liệu phòng học từ API:", response.data);
 
       if (response.data.success && Array.isArray(response.data.data)) {
-        // Fetch thêm thông tin tòa nhà cho mỗi phòng
-        const roomsWithBuildings = await Promise.all(
-          response.data.data.map(async (room) => {
-            if (room.building_id) {
-              try {
-                const buildingResponse = await axios.get(
-                  `${API_URL}/facilities/buildings/${room.building_id}`,
-                  {
-                    headers: { Authorization: `Bearer ${token}` },
-                  }
-                );
-
-                if (
-                  buildingResponse.data.success &&
-                  buildingResponse.data.data
-                ) {
-                  const building = buildingResponse.data.data;
-
-                  // Lấy thông tin cơ sở
-                  if (building.campus_id) {
-                    try {
-                      const campusResponse = await axios.get(
-                        `${API_URL}/facilities/campus/${building.campus_id}`,
-                        {
-                          headers: { Authorization: `Bearer ${token}` },
-                        }
-                      );
-
-                      if (
-                        campusResponse.data.success &&
-                        campusResponse.data.data
-                      ) {
-                        const campus = campusResponse.data.data;
-                        return {
-                          ...room,
-                          building: {
-                            ...building,
-                            campus: campus,
-                          },
-                        };
-                      }
-                    } catch (error) {
-                      console.error("Lỗi khi lấy thông tin cơ sở:", error);
-                    }
-                  }
-
-                  return {
-                    ...room,
-                    building: building,
-                  };
-                }
-              } catch (error) {
-                console.error("Lỗi khi lấy thông tin tòa nhà:", error);
-              }
-            }
-
-            return room;
-          })
-        );
-
-        setRooms(roomsWithBuildings);
+        // Lưu trữ dữ liệu phòng học và ghi log để kiểm tra
+        setRooms(response.data.data);
+        console.log("Đã cập nhật state rooms:", response.data.data);
       } else {
         setRooms([]);
+        console.error(
+          "API không trả về dữ liệu phòng học hợp lệ:",
+          response.data
+        );
+        enqueueSnackbar(
+          "Không thể tải danh sách phòng học (dữ liệu không hợp lệ)",
+          { variant: "warning" }
+        );
       }
     } catch (error) {
       console.error("Lỗi khi tải danh sách phòng học:", error);
@@ -244,6 +201,35 @@ const TeacherClassDetailPage = () => {
       }
 
       setClassInfo(classResponse.data.data);
+
+      // Fetch rooms right after setting class info to ensure it's done before rendering
+      await fetchRooms();
+
+      // Lấy danh sách phiên điểm danh
+      const sessionsResponse = await axios.get(
+        `${API_URL}/attendance/teaching-class/${id}/sessions`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      setAttendanceSessions(sessionsResponse.data.data || []);
+
+      // Tính toán thống kê điểm danh
+      const stats = {
+        total: sessionsResponse.data.data?.length || 0,
+        pending: 0,
+        completed: 0,
+      };
+
+      sessionsResponse.data.data?.forEach((session) => {
+        if (session.status === "completed") {
+          stats.completed++;
+        } else {
+          stats.pending++;
+        }
+      });
+
+      setAttendanceStats(stats);
 
       // Vì API getClassStudents không trả về đầy đủ thông tin, chúng ta sẽ lấy chi tiết từng sinh viên
       if (
@@ -344,32 +330,6 @@ const TeacherClassDetailPage = () => {
       } else {
         setStudents([]);
       }
-
-      // Lấy danh sách phiên điểm danh
-      const sessionsResponse = await axios.get(
-        `${API_URL}/attendance/teaching-class/${id}/sessions`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      setAttendanceSessions(sessionsResponse.data.data || []);
-
-      // Tính toán thống kê điểm danh
-      const stats = {
-        total: sessionsResponse.data.data?.length || 0,
-        pending: 0,
-        completed: 0,
-      };
-
-      sessionsResponse.data.data?.forEach((session) => {
-        if (session.status === "completed") {
-          stats.completed++;
-        } else {
-          stats.pending++;
-        }
-      });
-
-      setAttendanceStats(stats);
     } catch (error) {
       console.error("Lỗi khi tải dữ liệu lớp học:", error);
       // Xử lý các loại lỗi từ API
@@ -390,7 +350,6 @@ const TeacherClassDetailPage = () => {
       } else {
         enqueueSnackbar("Không thể kết nối đến máy chủ", { variant: "error" });
       }
-      setIsLoading(false);
     } finally {
       setIsLoading(false);
     }
@@ -869,16 +828,46 @@ const TeacherClassDetailPage = () => {
       student.email.toLowerCase().includes(searchStudent.toLowerCase())
   );
 
-  // Hàm để lấy thông tin đầy đủ của phòng học
-  const getRoomFullInfo = (roomId) => {
-    const room = rooms.find((r) => r._id === roomId);
-    if (!room) return roomId; // Hiển thị ID nếu không tìm thấy phòng
+  // Hàm để lấy thông tin đầy đủ của phòng học một cách đáng tin cậy từ state
+  const getRoomFullInfo = (roomInput) => {
+    // 1. Luôn kiểm tra xem state 'rooms' đã sẵn sàng chưa
+    if (!rooms || rooms.length === 0) {
+      console.log("State rooms chưa sẵn sàng hoặc rỗng", rooms);
+      return "Đang tải..."; // Rút gọn thông báo tải
+    }
 
-    const roomName = room.room_number || "Không xác định";
-    const buildingName = room.building?.name || "Không xác định";
-    const campusName = room.building?.campus?.name || "Không xác định";
+    // 2. Xác định ID phòng từ input (string hoặc object)
+    let roomId = null;
+    if (typeof roomInput === "string") {
+      roomId = roomInput;
+    } else if (
+      typeof roomInput === "object" &&
+      roomInput !== null &&
+      roomInput._id
+    ) {
+      roomId = roomInput._id;
+    } else {
+      // Nếu input không hợp lệ, trả về lỗi
+      console.warn("[DEBUG] getRoomFullInfo: Invalid roomInput", roomInput);
+      return "Lỗi"; // Rút gọn thông báo lỗi
+    }
 
-    return `${roomName} - ${buildingName} - ${campusName}`;
+    // 3. Tìm phòng trong state 'rooms' bằng ID
+    const foundRoom = rooms.find((r) => r._id === roomId);
+    console.log("Tìm phòng với ID:", roomId, "Kết quả:", foundRoom);
+
+    // 4. Xử lý kết quả tìm kiếm
+    if (!foundRoom) {
+      // Có thể phòng này không tồn tại trong danh sách hoặc danh sách chưa đầy đủ
+      // Trả về ID rút gọn để debug hoặc thông báo không tìm thấy
+      return `P. ${roomId?.slice(-4) || "?"}`; // Chỉ hiển thị 4 ký tự cuối ID nếu không tìm thấy
+    }
+
+    // 5. Lấy thông tin từ 'foundRoom' (đối tượng đã được populate từ state)
+    const roomName = foundRoom.room_number || "Không xác định";
+
+    // 6. Trả về chỉ tên phòng
+    return `${roomName}`;
   };
 
   if (isLoading) {
@@ -1154,160 +1143,159 @@ const TeacherClassDetailPage = () => {
               </TableHead>
               <TableBody>
                 {attendanceSessions.length > 0 ? (
-                  attendanceSessions.map((session, index) => (
-                    <TableRow key={session._id}>
-                      <TableCell>{index + 1}</TableCell>
-                      <TableCell>
-                        {new Date(session.date).toLocaleString("vi-VN", {
-                          weekday: "long",
-                          year: "numeric",
-                          month: "numeric",
-                          day: "numeric",
-                        })}
-                      </TableCell>
-                      <TableCell>
-                        {session.start_period && session.end_period ? (
-                          <Box>
-                            <Typography variant="body2">
-                              Tiết {session.start_period}-{session.end_period}
-                            </Typography>
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                            >
-                              {session.start_time && session.end_time
-                                ? `${new Date(
-                                    session.start_time
-                                  ).toLocaleTimeString("vi-VN", {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })} - ${new Date(
-                                    session.end_time
-                                  ).toLocaleTimeString("vi-VN", {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })}`
-                                : ""}
-                            </Typography>
-                          </Box>
-                        ) : session.start_time && session.end_time ? (
-                          `${new Date(session.start_time).toLocaleTimeString(
-                            "vi-VN",
-                            { hour: "2-digit", minute: "2-digit" }
-                          )} - ${new Date(session.end_time).toLocaleTimeString(
-                            "vi-VN",
-                            { hour: "2-digit", minute: "2-digit" }
-                          )}`
-                        ) : (
-                          "N/A"
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {session.room ? (
-                          typeof session.room === "object" ? (
-                            <Tooltip title="Thông tin đầy đủ phòng học">
+                  attendanceSessions.map((session, index) => {
+                    // Log the session.room before rendering
+                    console.log(
+                      `[DEBUG] Rendering room for session ${session._id}:`,
+                      session.room
+                    );
+                    return (
+                      <TableRow key={session._id}>
+                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>
+                          {new Date(session.date).toLocaleString("vi-VN", {
+                            weekday: "long",
+                            year: "numeric",
+                            month: "numeric",
+                            day: "numeric",
+                          })}
+                        </TableCell>
+                        <TableCell>
+                          {session.start_period && session.end_period ? (
+                            <Box>
                               <Typography variant="body2">
-                                {session.room.room_number || "Không xác định"} -{" "}
-                                {session.room.building?.name ||
-                                  "Không xác định"}
-                                {session.room.building?.campus?.name
-                                  ? ` - ${session.room.building.campus.name}`
+                                Tiết {session.start_period}-{session.end_period}
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
+                                {session.start_time && session.end_time
+                                  ? `${new Date(
+                                      session.start_time
+                                    ).toLocaleTimeString("vi-VN", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })} - ${new Date(
+                                      session.end_time
+                                    ).toLocaleTimeString("vi-VN", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}`
                                   : ""}
                               </Typography>
-                            </Tooltip>
+                            </Box>
+                          ) : session.start_time && session.end_time ? (
+                            `${new Date(session.start_time).toLocaleTimeString(
+                              "vi-VN",
+                              { hour: "2-digit", minute: "2-digit" }
+                            )} - ${new Date(
+                              session.end_time
+                            ).toLocaleTimeString("vi-VN", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}`
                           ) : (
-                            <Tooltip title="Thông tin đầy đủ phòng học">
+                            "N/A"
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {session.room ? (
+                            // Luôn sử dụng getRoomFullInfo để đảm bảo nhất quán
+                            <Tooltip title="Thông tin phòng học">
                               <Typography variant="body2">
                                 {getRoomFullInfo(session.room)}
                               </Typography>
                             </Tooltip>
-                          )
-                        ) : (
-                          <Typography variant="body2" color="text.secondary">
-                            Không có phòng
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {session.notes ? (
-                          <Tooltip title={session.notes}>
-                            <Typography
-                              variant="body2"
-                              sx={{
-                                maxWidth: "150px",
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                              }}
-                            >
-                              {session.notes}
+                          ) : (
+                            <Typography variant="body2" color="text.secondary">
+                              Không có phòng
                             </Typography>
-                          </Tooltip>
-                        ) : (
-                          <Typography variant="body2" color="text.secondary">
-                            -
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {session.status === "completed" ? (
-                          <Chip
-                            label="Hoàn thành"
-                            color="success"
-                            size="small"
-                          />
-                        ) : session.status === "in_progress" ? (
-                          <Chip
-                            label="Đang diễn ra"
-                            color="primary"
-                            size="small"
-                          />
-                        ) : (
-                          <Chip
-                            label="Chưa bắt đầu"
-                            color="default"
-                            size="small"
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Box sx={{ display: "flex", gap: 1 }}>
-                          <Button
-                            variant="contained"
-                            size="small"
-                            color="primary"
-                            onClick={() => handleStartSession(session._id)}
-                            startIcon={
-                              session.status === "completed" ? (
-                                <CheckCircle />
-                              ) : (
-                                <PlayArrow />
-                              )
-                            }
-                          >
-                            {session.status === "completed" ? "Xem" : "Bắt đầu"}
-                          </Button>
-                          <Tooltip title="Chỉnh sửa thông tin">
-                            <IconButton
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {session.notes ? (
+                            <Tooltip title={session.notes}>
+                              <Typography
+                                variant="body2"
+                                sx={{
+                                  maxWidth: "150px",
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                }}
+                              >
+                                {session.notes}
+                              </Typography>
+                            </Tooltip>
+                          ) : (
+                            <Typography variant="body2" color="text.secondary">
+                              -
+                            </Typography>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {session.status === "completed" ? (
+                            <Chip
+                              label="Hoàn thành"
+                              color="success"
                               size="small"
+                            />
+                          ) : session.status === "in_progress" ? (
+                            <Chip
+                              label="Đang diễn ra"
+                              color="primary"
+                              size="small"
+                            />
+                          ) : (
+                            <Chip
+                              label="Chưa bắt đầu"
                               color="default"
-                              onClick={() => {
-                                setSessionFormData({
-                                  ...session,
-                                  date: session.date.split("T")[0],
-                                });
-                                // Tải danh sách phòng học
-                                fetchRooms();
-                                setOpenSessionDialog(true);
-                              }}
+                              size="small"
+                            />
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Box sx={{ display: "flex", gap: 1 }}>
+                            <Button
+                              variant="contained"
+                              size="small"
+                              color="primary"
+                              onClick={() => handleStartSession(session._id)}
+                              startIcon={
+                                session.status === "completed" ? (
+                                  <CheckCircle />
+                                ) : (
+                                  <PlayArrow />
+                                )
+                              }
                             >
-                              <Edit />
-                            </IconButton>
-                          </Tooltip>
-                        </Box>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                              {session.status === "completed"
+                                ? "Xem"
+                                : "Bắt đầu"}
+                            </Button>
+                            <Tooltip title="Chỉnh sửa thông tin">
+                              <IconButton
+                                size="small"
+                                color="default"
+                                onClick={() => {
+                                  setSessionFormData({
+                                    ...session,
+                                    date: session.date.split("T")[0],
+                                  });
+                                  // Tải danh sách phòng học
+                                  fetchRooms();
+                                  setOpenSessionDialog(true);
+                                }}
+                              >
+                                <Edit />
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 ) : (
                   <TableRow>
                     <TableCell colSpan={8} align="center">
@@ -1335,15 +1323,6 @@ const TeacherClassDetailPage = () => {
         </DialogTitle>
         <DialogContent>
           <Box sx={{ mt: 2 }}>
-            <TextField
-              fullWidth
-              label="Nội dung buổi học"
-              name="title"
-              placeholder="Ví dụ: Kiểm tra giữa kỳ, Học bài mới..."
-              value={sessionFormData.title}
-              onChange={handleSessionFormChange}
-              sx={{ mb: 2 }}
-            />
             <TextField
               fullWidth
               label="Ngày"

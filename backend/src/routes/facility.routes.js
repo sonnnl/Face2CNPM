@@ -5,14 +5,14 @@ const { protect, authorize } = require("../middlewares/auth.middleware");
 
 // Campus routes
 // @route   GET /api/facilities/campus
-router.get("/campus", protect, facilityController.getAllCampuses);
+router.get("/campuses", protect, facilityController.getAllCampuses);
 
 // @route   GET /api/facilities/campus/:id
-router.get("/campus/:id", protect, facilityController.getCampusById);
+router.get("/campuses/:id", protect, facilityController.getCampusById);
 
 // @route   POST /api/facilities/campus
 router.post(
-  "/campus",
+  "/campuses",
   protect,
   authorize(["admin"]),
   facilityController.createCampus
@@ -20,7 +20,7 @@ router.post(
 
 // @route   PUT /api/facilities/campus/:id
 router.put(
-  "/campus/:id",
+  "/campuses/:id",
   protect,
   authorize(["admin"]),
   facilityController.updateCampus
@@ -28,7 +28,7 @@ router.put(
 
 // @route   DELETE /api/facilities/campus/:id
 router.delete(
-  "/campus/:id",
+  "/campuses/:id",
   protect,
   authorize(["admin"]),
   facilityController.deleteCampus
@@ -40,7 +40,7 @@ router.get("/buildings", protect, facilityController.getAllBuildings);
 
 // @route   GET /api/facilities/buildings/campus/:campusId
 router.get(
-  "/buildings/campus/:campusId",
+  "/buildings/campuses/:campusId",
   protect,
   facilityController.getBuildingsByCampus
 );

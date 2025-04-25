@@ -549,7 +549,14 @@ exports.getAllRooms = async (req, res) => {
 
     const total = await Room.countDocuments(query);
     const rooms = await Room.find(query)
-      .populate("building_id", "name code")
+      .populate({
+        path: "building_id",
+        select: "name code campus_id",
+        populate: {
+          path: "campus_id",
+          select: "name code",
+        },
+      })
       .skip((page - 1) * limit)
       .limit(limit)
       .sort({ room_number: 1 });

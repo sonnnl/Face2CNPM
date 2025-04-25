@@ -182,7 +182,7 @@ const TeacherClassesPage = () => {
         axios.get(`${API_URL}/classes/main?all=true`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
-        axios.get(`${API_URL}/facilities/campus`, {
+        axios.get(`${API_URL}/facilities/campuses`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
       ]);
@@ -206,7 +206,7 @@ const TeacherClassesPage = () => {
 
     try {
       const response = await axios.get(
-        `${API_URL}/facilities/buildings/campus/${campusId}`,
+        `${API_URL}/facilities/buildings/campuses/${campusId}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         }
