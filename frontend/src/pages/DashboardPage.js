@@ -316,7 +316,15 @@ const DashboardPage = () => {
                           color="textSecondary"
                           noWrap
                         >
-                          {classItem.course_id?.name || "N/A"}
+                          <strong>Môn học:</strong>{" "}
+                          {classItem.subject_id?.name ||
+                            "Chưa có thông tin môn học"}{" "}
+                          ({classItem.subject_id?.code || "N/A"})
+                        </Typography>
+                        <Typography variant="body2" color="textSecondary">
+                          <strong>Lớp chính:</strong>{" "}
+                          {classItem.main_class_id?.name || "Chưa có thông tin"}{" "}
+                          ({classItem.main_class_id?.class_code || ""})
                         </Typography>
                         <Box mt={1} display="flex" alignItems="center">
                           <Person sx={{ mr: 1, fontSize: 18 }} />
@@ -541,7 +549,20 @@ const DashboardPage = () => {
                           color="textSecondary"
                           noWrap
                         >
-                          {classItem.course_id?.name || "N/A"}
+                          <strong>Môn học:</strong>{" "}
+                          {classItem.subject_id?.name ||
+                            "Chưa có thông tin môn học"}{" "}
+                          ({classItem.subject_id?.code || "N/A"})
+                        </Typography>
+                        <Typography variant="body2" color="textSecondary">
+                          <strong>Lớp:</strong>{" "}
+                          {classItem.main_class_id?.name || "Chưa có thông tin"}{" "}
+                          ({classItem.main_class_id?.class_code || ""})
+                        </Typography>
+                        <Typography variant="body2" color="textSecondary">
+                          <strong>Học kỳ:</strong>{" "}
+                          {classItem.semester_id?.name || "Chưa có thông tin"}{" "}
+                          {classItem.semester_id?.year || ""}
                         </Typography>
                         <Box mt={1} display="flex" alignItems="center">
                           <People sx={{ mr: 1, fontSize: 18 }} />
@@ -786,7 +807,10 @@ const DashboardPage = () => {
                     </ListItemAvatar>
                     <ListItemText
                       primary={classItem.class_name}
-                      secondary={`${classItem.course_id?.name || "N/A"} - GV: ${
+                      secondary={`${
+                        classItem.subject_id?.name ||
+                        "Chưa có thông tin môn học"
+                      } (${classItem.subject_id?.code || "N/A"}) - GV: ${
                         classItem.teacher_id?.full_name || "Chưa phân công"
                       }`}
                     />

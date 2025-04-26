@@ -27,6 +27,29 @@ export const loadModels = async () => {
 };
 
 /**
+ * Kiểm tra tính hợp lệ của một bounding box
+ * @param {Object} box - Box object từ face-api.js
+ * @returns {boolean} - Hợp lệ hay không
+ */
+const isValidBox = (box) => {
+  if (!box) return false;
+
+  const { x, y, width, height } = box;
+  return (
+    x !== null &&
+    y !== null &&
+    width !== null &&
+    height !== null &&
+    !isNaN(x) &&
+    !isNaN(y) &&
+    !isNaN(width) &&
+    !isNaN(height) &&
+    width > 0 &&
+    height > 0
+  );
+};
+
+/**
  * Phát hiện khuôn mặt từ hình ảnh
  * @param {string} imageData - Base64 image data
  * @returns {Promise<Object>} - Kết quả phát hiện khuôn mặt
@@ -37,17 +60,51 @@ export const detectFace = async (imageData) => {
   }
 
   try {
-    const img = await faceapi.fetchImage(imageData);
+    const img = await createImage(imageData);
+
+    const detectionOptions = new faceapi.TinyFaceDetectorOptions({
+      minConfidence: 0.5,
+    });
+
     const detections = await faceapi
-      .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+      .detectSingleFace(img, detectionOptions)
       .withFaceLandmarks()
       .withFaceDescriptor();
+
+    // Kiểm tra kết quả phát hiện
+    if (!detections || !detections.detection) {
+      console.warn("Không phát hiện được khuôn mặt");
+      return null;
+    }
+
+    // Kiểm tra tính hợp lệ của box
+    if (!isValidBox(detections.detection.box)) {
+      console.warn(
+        "Phát hiện khuôn mặt với box không hợp lệ:",
+        detections.detection.box
+      );
+      return null;
+    }
 
     return detections;
   } catch (error) {
     console.error("Error detecting face:", error);
-    throw error;
+    return null; // Trả về null thay vì throw exception
   }
+};
+
+/**
+ * Tạo đối tượng Image từ base64 data
+ * @param {string} imageData - Base64 image data
+ * @returns {Promise<HTMLImageElement>} - Đối tượng Image
+ */
+const createImage = async (imageData) => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = (err) => reject(err);
+    img.src = imageData;
+  });
 };
 
 /**
@@ -57,7 +114,14 @@ export const detectFace = async (imageData) => {
  * @returns {number} - Khoảng cách (0-1, càng nhỏ càng giống nhau)
  */
 export const getFaceDistance = (descriptor1, descriptor2) => {
-  return faceapi.euclideanDistance(descriptor1, descriptor2);
+  if (!descriptor1 || !descriptor2) return 1.0; // Khoảng cách lớn nhất nếu không có dữ liệu
+
+  try {
+    return faceapi.euclideanDistance(descriptor1, descriptor2);
+  } catch (error) {
+    console.error("Lỗi khi tính khoảng cách:", error);
+    return 1.0;
+  }
 };
 
 /**
@@ -68,6 +132,13 @@ export const getFaceDistance = (descriptor1, descriptor2) => {
  * @returns {boolean} - Có phải cùng một người không
  */
 export const isSameFace = (descriptor1, descriptor2, threshold = 0.6) => {
-  const distance = getFaceDistance(descriptor1, descriptor2);
-  return distance < threshold;
+  if (!descriptor1 || !descriptor2) return false;
+
+  try {
+    const distance = getFaceDistance(descriptor1, descriptor2);
+    return distance < threshold;
+  } catch (error) {
+    console.error("Lỗi khi so sánh khuôn mặt:", error);
+    return false;
+  }
 };

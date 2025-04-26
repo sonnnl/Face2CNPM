@@ -1128,31 +1128,65 @@ const TeacherClassDetailPage = () => {
                                 variant="caption"
                                 color="text.secondary"
                               >
-                                {session.start_time && session.end_time
-                                  ? `${new Date(
-                                      session.start_time
-                                    ).toLocaleTimeString("vi-VN", {
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    })} - ${new Date(
-                                      session.end_time
-                                    ).toLocaleTimeString("vi-VN", {
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    })}`
-                                  : ""}
+                                {(() => {
+                                  // Hiển thị thời gian bắt đầu từ API
+                                  const startTime = session.start_time
+                                    ? new Date(
+                                        session.start_time
+                                      ).toLocaleTimeString("vi-VN", {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })
+                                    : "N/A";
+
+                                  // Tính thời gian kết thúc dự kiến dựa trên lịch học, không phải thời gian kết thúc thực tế
+                                  // Mỗi tiết thường kéo dài 50 phút
+                                  let endTimeDate;
+                                  if (session.start_time) {
+                                    // Tính thời gian kết thúc dự kiến dựa trên số tiết
+                                    const tietsCount =
+                                      session.end_period -
+                                      session.start_period +
+                                      1;
+                                    endTimeDate = new Date(session.start_time);
+                                    endTimeDate.setMinutes(
+                                      endTimeDate.getMinutes() + tietsCount * 50
+                                    );
+                                  }
+
+                                  const endTime = endTimeDate
+                                    ? endTimeDate.toLocaleTimeString("vi-VN", {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })
+                                    : "N/A";
+
+                                  return `${startTime} - ${endTime}`;
+                                })()}
                               </Typography>
                             </Box>
-                          ) : session.start_time && session.end_time ? (
-                            `${new Date(session.start_time).toLocaleTimeString(
-                              "vi-VN",
-                              { hour: "2-digit", minute: "2-digit" }
-                            )} - ${new Date(
-                              session.end_time
-                            ).toLocaleTimeString("vi-VN", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}`
+                          ) : session.start_time ? (
+                            (() => {
+                              // Hiển thị thời gian bắt đầu từ API
+                              const startTime = new Date(
+                                session.start_time
+                              ).toLocaleTimeString("vi-VN", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              });
+
+                              // Mặc định coi mỗi buổi học kéo dài 4 tiết (200 phút) nếu không có thông tin tiết
+                              const endTimeDate = new Date(session.start_time);
+                              endTimeDate.setMinutes(
+                                endTimeDate.getMinutes() + 200
+                              );
+                              const endTime = endTimeDate.toLocaleTimeString(
+                                "vi-VN",
+                                { hour: "2-digit", minute: "2-digit" }
+                              );
+
+                              return `${startTime} - ${endTime}`;
+                            })()
                           ) : (
                             "N/A"
                           )}

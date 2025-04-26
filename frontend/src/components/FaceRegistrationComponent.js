@@ -89,15 +89,41 @@ const FaceRegistrationComponent = ({ onFaceDataCapture, maxImages = 3 }) => {
         faceapi.matchDimensions(canvas, displaySize);
 
         try {
+          // Kiểm tra video đã sẵn sàng chưa
+          if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
+            // Video chưa sẵn sàng, bỏ qua detection ở lần này
+            return;
+          }
+
           // Detect face with landmarks
           const detections = await faceapi
             .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
             .withFaceLandmarks();
 
+          // Clear canvas
+          const ctx = canvas.getContext("2d");
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
           if (detections) {
-            // Clear canvas and draw landmarks
-            const ctx = canvas.getContext("2d");
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Kiểm tra tính hợp lệ của box
+            const { box } = detections.detection;
+            if (
+              !box ||
+              box.x === null ||
+              box.y === null ||
+              box.width === null ||
+              box.height === null ||
+              isNaN(box.x) ||
+              isNaN(box.y) ||
+              isNaN(box.width) ||
+              isNaN(box.height) ||
+              box.width <= 0 ||
+              box.height <= 0
+            ) {
+              // Box không hợp lệ, bỏ qua
+              console.warn("Phát hiện box không hợp lệ:", box);
+              return;
+            }
 
             // Resize detection results
             const resizedDetections = faceapi.resizeResults(
@@ -111,19 +137,28 @@ const FaceRegistrationComponent = ({ onFaceDataCapture, maxImages = 3 }) => {
           }
         } catch (error) {
           console.error("Error detecting face in real-time:", error);
+          // Không hiển thị lỗi cho người dùng để tránh gây khó chịu
+          // Chỉ ghi log để debug
         }
       }
     };
 
     if (modelsLoaded && isCameraReady && showLandmarks) {
-      intervalId = setInterval(runFaceDetection, 100);
-    }
+      // Sử dụng requestAnimationFrame thay vì setInterval để tối ưu hóa hiệu suất
+      let animationFrameId;
+      const runDetectionLoop = async () => {
+        await runFaceDetection();
+        animationFrameId = requestAnimationFrame(runDetectionLoop);
+      };
 
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
+      animationFrameId = requestAnimationFrame(runDetectionLoop);
+
+      return () => {
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+        }
+      };
+    }
   }, [modelsLoaded, isCameraReady, showLandmarks, isProcessing]);
 
   // Capture and detect face
@@ -271,7 +306,7 @@ const FaceRegistrationComponent = ({ onFaceDataCapture, maxImages = 3 }) => {
                   width={320}
                   height={320}
                 />
-                {capturedImages.length >= maxImages && (
+                {isProcessing && (
                   <Box
                     sx={{
                       position: "absolute",

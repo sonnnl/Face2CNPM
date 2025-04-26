@@ -177,9 +177,10 @@ exports.updateAttendanceSession = async (req, res) => {
     if (status) {
       session.status = status;
 
-      // Nếu hoàn thành, cập nhật thời gian kết thúc
+      // Nếu hoàn thành, chỉ cập nhật điểm chuyên cần, không cập nhật thời gian kết thúc
       if (status === "completed") {
-        session.end_time = new Date();
+        // Không cập nhật end_time nữa, để giữ nguyên thời gian kết thúc dự kiến
+        // session.end_time = new Date(); <- dòng này đã bị xóa
 
         // Tự động cập nhật điểm chuyên cần
         await updateAttendanceScores(session.teaching_class_id);
@@ -668,9 +669,10 @@ exports.updateSessionStatus = async (req, res) => {
       session.start_time = new Date();
     }
 
-    // Nếu hoàn thành, cập nhật thời gian kết thúc
+    // Khi hoàn thành, chỉ cập nhật trạng thái và điểm chuyên cần
     if (status === "completed") {
-      session.end_time = new Date();
+      // Không cập nhật end_time nữa, để giữ nguyên thời gian kết thúc dự kiến
+      // session.end_time = new Date(); <- dòng này đã bị xóa
 
       // Tự động cập nhật điểm chuyên cần
       if (typeof updateAttendanceScores === "function") {
