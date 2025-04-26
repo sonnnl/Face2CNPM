@@ -6,70 +6,93 @@ import {
   Button,
   CircularProgress,
   Alert,
-  Card,
-  CardContent,
+  Stack,
+  Avatar,
+  Paper,
   FormControlLabel,
   Switch,
 } from "@mui/material";
-import { Camera, CheckCircle, Error } from "@mui/icons-material";
+import {
+  CameraAlt,
+  CheckCircleOutline,
+  ErrorOutline,
+  Person,
+  Replay,
+  Visibility,
+  VisibilityOff,
+} from "@mui/icons-material";
 import { loadModels, detectFace } from "../utils/faceUtils";
 import * as faceapi from "face-api.js";
 
 // Lazy load Webcam
 const Webcam = lazy(() => import("react-webcam"));
 
-const FaceRegistrationComponent = ({ onFaceDataCapture, maxImages = 3 }) => {
+// Consistent video constraints
+const videoConstraints = {
+  width: { ideal: 480 },
+  height: { ideal: 360 },
+  facingMode: "user",
+};
+
+const FaceRegistrationComponent = ({
+  onFaceDataCapture,
+  requiredImages = 3,
+}) => {
   // Refs
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
 
   // State
-  const [isLoading, setIsLoading] = useState(false);
   const [modelsLoaded, setModelsLoaded] = useState(false);
-  const [isCameraReady, setIsCameraReady] = useState(false);
+  const [modelLoadingError, setModelLoadingError] = useState(null);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState(null);
   const [capturedImages, setCapturedImages] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState("");
+  const [captureError, setCaptureError] = useState("");
   const [showLandmarks, setShowLandmarks] = useState(true);
   const { enqueueSnackbar } = useSnackbar();
-  const [detectionInterval, setDetectionInterval] = useState(null);
 
-  // Load face recognition models
+  // 1. Load face recognition models on mount
   useEffect(() => {
     const initModels = async () => {
+      setModelLoadingError(null); // Reset error
       try {
-        setIsLoading(true);
+        console.log("[FaceComponent] Loading models...");
         await loadModels();
         setModelsLoaded(true);
-        enqueueSnackbar("Đã tải mô hình nhận diện khuôn mặt", {
-          variant: "success",
-        });
-      } catch (error) {
-        console.error("Lỗi khi tải mô hình:", error);
-        setError(
-          "Không thể tải mô hình nhận diện khuôn mặt. Vui lòng tải lại trang."
+        console.log("[FaceComponent] Models loaded successfully.");
+        // enqueueSnackbar("Đã tải mô hình nhận diện", { variant: "success", autoHideDuration: 1500 });
+      } catch (err) {
+        console.error("[FaceComponent] Error loading models:", err);
+        setModelLoadingError(
+          "Không thể tải mô hình nhận diện. Vui lòng thử tải lại trang."
         );
-        enqueueSnackbar("Lỗi khi tải mô hình nhận diện", {
-          variant: "error",
-        });
-      } finally {
-        setIsLoading(false);
+        enqueueSnackbar("Lỗi tải mô hình nhận diện", { variant: "error" });
       }
     };
-
     initModels();
-  }, [enqueueSnackbar]);
+  }, [enqueueSnackbar]); // Run only once on mount
 
-  // Check if camera is ready
-  useEffect(() => {
-    if (webcamRef.current?.video?.readyState === 4) {
-      setIsCameraReady(true);
-    }
-  }, [webcamRef.current?.video?.readyState]);
+  // 2. Handle camera state changes
+  const handleUserMedia = () => {
+    console.log("[FaceComponent] Camera is ready.");
+    setCameraReady(true);
+    setCameraError(null); // Clear previous camera error
+  };
 
-  // Run face detection in real-time
+  const handleUserMediaError = (error) => {
+    console.error("[FaceComponent] Camera error:", error);
+    setCameraReady(false);
+    const errorMsg =
+      "Không thể truy cập camera. Vui lòng cấp quyền và thử lại.";
+    setCameraError(errorMsg);
+    enqueueSnackbar(errorMsg, { variant: "error" });
+  };
+
+  // 3. Real-time landmark drawing effect
   useEffect(() => {
-    let intervalId;
+    let animationFrameId;
 
     const runFaceDetection = async () => {
       if (
@@ -77,314 +100,412 @@ const FaceRegistrationComponent = ({ onFaceDataCapture, maxImages = 3 }) => {
         webcamRef.current.video &&
         canvasRef.current &&
         modelsLoaded &&
-        isCameraReady &&
+        cameraReady &&
         showLandmarks &&
         !isProcessing
       ) {
         const video = webcamRef.current.video;
         const canvas = canvasRef.current;
 
-        // Match dimensions
-        const displaySize = { width: video.width, height: video.height };
-        faceapi.matchDimensions(canvas, displaySize);
+        if (video.readyState < 3) {
+          // Wait until video has enough data
+          return;
+        }
+
+        const displaySize = {
+          width: video.videoWidth,
+          height: video.videoHeight,
+        };
+        if (
+          canvas.width !== displaySize.width ||
+          canvas.height !== displaySize.height
+        ) {
+          faceapi.matchDimensions(canvas, displaySize);
+        }
 
         try {
-          // Kiểm tra video đã sẵn sàng chưa
-          if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
-            // Video chưa sẵn sàng, bỏ qua detection ở lần này
-            return;
-          }
-
-          // Detect face with landmarks
           const detections = await faceapi
             .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
             .withFaceLandmarks();
 
-          // Clear canvas
           const ctx = canvas.getContext("2d");
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
           if (detections) {
-            // Kiểm tra tính hợp lệ của box
-            const { box } = detections.detection;
-            if (
-              !box ||
-              box.x === null ||
-              box.y === null ||
-              box.width === null ||
-              box.height === null ||
-              isNaN(box.x) ||
-              isNaN(box.y) ||
-              isNaN(box.width) ||
-              isNaN(box.height) ||
-              box.width <= 0 ||
-              box.height <= 0
-            ) {
-              // Box không hợp lệ, bỏ qua
-              console.warn("Phát hiện box không hợp lệ:", box);
-              return;
-            }
-
-            // Resize detection results
             const resizedDetections = faceapi.resizeResults(
               detections,
               displaySize
             );
-
-            // Draw detection results
-            faceapi.draw.drawDetections(canvas, resizedDetections);
             faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+          } else {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
           }
         } catch (error) {
-          console.error("Error detecting face in real-time:", error);
-          // Không hiển thị lỗi cho người dùng để tránh gây khó chịu
-          // Chỉ ghi log để debug
+          // Don't spam console if detection fails occasionally
+          // console.error("Error in real-time detection loop:", error);
         }
       }
     };
 
-    if (modelsLoaded && isCameraReady && showLandmarks) {
-      // Sử dụng requestAnimationFrame thay vì setInterval để tối ưu hóa hiệu suất
-      let animationFrameId;
-      const runDetectionLoop = async () => {
-        await runFaceDetection();
-        animationFrameId = requestAnimationFrame(runDetectionLoop);
-      };
-
-      animationFrameId = requestAnimationFrame(runDetectionLoop);
-
-      return () => {
-        if (animationFrameId) {
-          cancelAnimationFrame(animationFrameId);
-        }
-      };
-    }
-  }, [modelsLoaded, isCameraReady, showLandmarks, isProcessing]);
-
-  // Capture and detect face
-  const captureImage = async () => {
-    if (!webcamRef.current || !isCameraReady) {
-      enqueueSnackbar("Camera chưa sẵn sàng, vui lòng thử lại", {
-        variant: "warning",
+    const detectionLoop = () => {
+      runFaceDetection().finally(() => {
+        animationFrameId = requestAnimationFrame(detectionLoop);
       });
+    };
+
+    // Start loop only when everything is ready and landmarks are enabled
+    if (
+      modelsLoaded &&
+      cameraReady &&
+      showLandmarks &&
+      !modelLoadingError &&
+      !cameraError
+    ) {
+      console.log("[FaceComponent] Starting landmark detection loop.");
+      animationFrameId = requestAnimationFrame(detectionLoop);
+    } else {
+      // Clear canvas if conditions are not met
+      if (canvasRef.current) {
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    // Cleanup function
+    return () => {
+      console.log("[FaceComponent] Stopping landmark detection loop.");
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [
+    modelsLoaded,
+    cameraReady,
+    showLandmarks,
+    isProcessing,
+    modelLoadingError,
+    cameraError,
+  ]);
+
+  // 4. Capture and detect face
+  const captureImage = async () => {
+    // Basic checks
+    if (!webcamRef.current || !cameraReady || isProcessing || !modelsLoaded) {
+      let reason = "Chưa sẵn sàng";
+      if (!cameraReady) reason = "Camera chưa sẵn sàng";
+      else if (isProcessing) reason = "Đang xử lý";
+      else if (!modelsLoaded) reason = "Mô hình chưa tải xong";
+      enqueueSnackbar(`Không thể chụp ảnh: ${reason}`, { variant: "warning" });
+      return;
+    }
+    if (capturedImages.length >= requiredImages) {
+      enqueueSnackbar(`Đã chụp đủ ${requiredImages} ảnh.`, { variant: "info" });
       return;
     }
 
+    setIsProcessing(true);
+    setCaptureError(""); // Clear previous capture error
+
     try {
-      setIsProcessing(true);
-      // Capture image
-      const imageSrc = webcamRef.current.getScreenshot();
+      const imageSrc = webcamRef.current.getScreenshot({
+        width: videoConstraints.width.ideal,
+        height: videoConstraints.height.ideal,
+      });
       if (!imageSrc) {
-        enqueueSnackbar("Không thể chụp ảnh, vui lòng thử lại", {
-          variant: "error",
-        });
-        setIsProcessing(false);
-        return;
+        throw new Error("Không thể chụp ảnh từ webcam.");
       }
 
-      // Detect face
+      // Perform face detection
+      console.log("[FaceComponent] Detecting face in captured image...");
       const detections = await detectFace(imageSrc);
 
-      if (!detections) {
+      if (!detections || !detections.descriptor) {
+        console.warn(
+          "[FaceComponent] Face detection failed or no descriptor found."
+        );
         enqueueSnackbar(
-          "Không phát hiện được khuôn mặt, vui lòng thử lại và đảm bảo khuôn mặt của bạn nằm trong khung hình",
+          "Không phát hiện được khuôn mặt rõ ràng. Hãy thử lại.",
           { variant: "warning" }
         );
-        setIsProcessing(false);
+        setIsProcessing(false); // Allow retry
         return;
       }
+      console.log("[FaceComponent] Face detected successfully.");
 
-      // Save image and face info
-      const newImage = {
+      // Store image and descriptor
+      const newImageData = {
         img: imageSrc,
-        descriptor: Array.from(detections.descriptor),
+        descriptor: Array.from(detections.descriptor), // Ensure serializable
       };
+      const updatedImages = [...capturedImages, newImageData];
+      setCapturedImages(updatedImages);
 
-      setCapturedImages((prev) => [...prev, newImage]);
-
-      enqueueSnackbar(`Đã chụp ảnh ${capturedImages.length + 1}/${maxImages}`, {
+      enqueueSnackbar(`Đã chụp ảnh ${updatedImages.length}/${requiredImages}`, {
         variant: "success",
+        autoHideDuration: 1500,
       });
 
-      // If enough images, pass data to parent
-      if (capturedImages.length + 1 >= maxImages) {
-        onFaceDataCapture([...capturedImages, newImage]);
+      // If enough images captured, notify parent immediately
+      if (updatedImages.length >= requiredImages) {
+        console.log(
+          `[FaceComponent] Captured ${requiredImages} images. Calling onFaceDataCapture.`
+        );
+        onFaceDataCapture(updatedImages); // Pass all captured data
+        enqueueSnackbar(`Đã chụp đủ ${requiredImages} ảnh!`, {
+          variant: "info",
+        });
       }
-    } catch (error) {
-      console.error("Lỗi khi chụp ảnh:", error);
-      enqueueSnackbar("Đã xảy ra lỗi khi chụp ảnh", { variant: "error" });
+    } catch (err) {
+      console.error("[FaceComponent] Error capturing image:", err);
+      const errorMsg = "Lỗi khi chụp ảnh. Vui lòng thử lại.";
+      setCaptureError(errorMsg);
+      enqueueSnackbar(errorMsg, { variant: "error" });
     } finally {
       setIsProcessing(false);
     }
   };
 
+  // 5. Reset capture
   const resetCapture = () => {
+    console.log("[FaceComponent] Resetting capture.");
     setCapturedImages([]);
+    setCaptureError("");
+    // Notify parent that data is cleared (optional, depends on parent needs)
+    // onFaceDataCapture(null); or onFaceDataCapture([]);
+    enqueueSnackbar("Đã xóa ảnh đã chụp, bạn có thể chụp lại.", {
+      variant: "info",
+    });
   };
 
-  // Webcam config
-  const videoConstraints = {
-    width: 320,
-    height: 320,
-    facingMode: "user",
-  };
+  // --- Render Logic ---
 
-  return (
-    <Card variant="outlined" sx={{ mb: 3 }}>
-      <CardContent>
-        <Typography variant="h6" gutterBottom>
-          Đăng ký khuôn mặt
-        </Typography>
+  const renderCameraView = () => (
+    <Paper
+      elevation={2}
+      sx={{
+        position: "relative",
+        width: "100%",
+        maxWidth: `${videoConstraints.width.ideal}px`,
+        aspectRatio: `${videoConstraints.width.ideal} / ${videoConstraints.height.ideal}`,
+        margin: "16px auto",
+        overflow: "hidden",
+        bgcolor: "grey.200",
+        border: cameraError ? "2px solid red" : "1px solid",
+        borderColor: "divider",
+      }}
+    >
+      <Suspense
+        fallback={
+          <Box
+            sx={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+            }}
+          >
+            <CircularProgress />
+          </Box>
+        }
+      >
+        <Webcam
+          audio={false}
+          ref={webcamRef}
+          screenshotFormat="image/jpeg"
+          videoConstraints={videoConstraints}
+          onUserMedia={handleUserMedia}
+          onUserMediaError={handleUserMediaError}
+          style={{
+            display: "block",
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+          }}
+        />
+        <canvas
+          ref={canvasRef}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            display: showLandmarks ? "block" : "none",
+          }}
+        />
+      </Suspense>
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
-
-        <Box sx={{ mb: 2 }}>
-          <Typography variant="body2" color="text.secondary" paragraph>
-            Vui lòng chụp {maxImages} ảnh khuôn mặt của bạn từ các góc khác nhau
-            để hệ thống nhận diện tốt hơn.
-          </Typography>
-
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Đã chụp: {capturedImages.length}/{maxImages} ảnh
-          </Alert>
-
-          <FormControlLabel
-            control={
-              <Switch
-                checked={showLandmarks}
-                onChange={(e) => setShowLandmarks(e.target.checked)}
-              />
-            }
-            label="Hiển thị landmark khuôn mặt"
-          />
-        </Box>
-
+      {/* Loading/Error Overlay */}
+      {(!modelsLoaded || !cameraReady || cameraError || modelLoadingError) && (
         <Box
           sx={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
             display: "flex",
             flexDirection: "column",
-            alignItems: "center",
             justifyContent: "center",
-            mb: 2,
+            alignItems: "center",
+            color: "white",
+            textAlign: "center",
+            p: 2,
           }}
         >
-          {isLoading ? (
-            <CircularProgress />
-          ) : (
-            <Suspense fallback={<CircularProgress />}>
-              <Box
-                sx={{
-                  border: "2px solid #ddd",
-                  borderRadius: 2,
-                  overflow: "hidden",
-                  width: 320,
-                  height: 320,
-                  position: "relative",
-                }}
-              >
-                <Webcam
-                  audio={false}
-                  ref={webcamRef}
-                  screenshotFormat="image/jpeg"
-                  videoConstraints={videoConstraints}
-                  style={{ width: "100%", height: "100%" }}
-                  onUserMedia={() => setIsCameraReady(true)}
-                  width={320}
-                  height={320}
-                />
-                <canvas
-                  ref={canvasRef}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                  }}
-                  width={320}
-                  height={320}
-                />
-                {isProcessing && (
-                  <Box
-                    sx={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      height: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      backgroundColor: "rgba(0, 0, 0, 0.6)",
-                    }}
-                  >
-                    <CheckCircle
-                      color="success"
-                      sx={{ fontSize: 48, color: "#4caf50" }}
-                    />
-                  </Box>
-                )}
-              </Box>
-            </Suspense>
+          <CircularProgress color="inherit" sx={{ mb: 2 }} />
+          {modelLoadingError && (
+            <Typography variant="body2" color="error">
+              {modelLoadingError}
+            </Typography>
           )}
+          {cameraError && (
+            <Typography variant="body2" color="error">
+              {cameraError}
+            </Typography>
+          )}
+          {!modelLoadingError && !cameraError && !modelsLoaded && (
+            <Typography>Đang tải mô hình...</Typography>
+          )}
+          {!modelLoadingError &&
+            !cameraError &&
+            modelsLoaded &&
+            !cameraReady && <Typography>Đang khởi động camera...</Typography>}
         </Box>
+      )}
+    </Paper>
+  );
 
+  const renderCaptureControls = () => (
+    <Box sx={{ textAlign: "center", mt: 2 }}>
+      <FormControlLabel
+        control={
+          <Switch
+            checked={showLandmarks}
+            onChange={(e) => setShowLandmarks(e.target.checked)}
+            size="small"
+          />
+        }
+        label="Hiện Landmark"
+        sx={{ mb: 1, display: "block" }}
+      />
+      <Button
+        variant="contained"
+        color="primary"
+        startIcon={<CameraAlt />}
+        onClick={captureImage}
+        disabled={
+          !cameraReady ||
+          !modelsLoaded ||
+          isProcessing ||
+          capturedImages.length >= requiredImages ||
+          !!cameraError ||
+          !!modelLoadingError
+        }
+        sx={{ mb: 1, mr: 1 }}
+      >
+        {isProcessing ? (
+          <CircularProgress size={24} color="inherit" />
+        ) : (
+          `Chụp ảnh (${capturedImages.length}/${requiredImages})`
+        )}
+      </Button>
+      <Button
+        variant="outlined"
+        color="warning"
+        startIcon={<Replay />}
+        onClick={resetCapture}
+        disabled={capturedImages.length === 0 || isProcessing}
+        sx={{ mb: 1 }}
+      >
+        Chụp lại
+      </Button>
+      {captureError && (
+        <Alert severity="error" sx={{ mt: 2, textAlign: "left" }}>
+          {captureError}
+        </Alert>
+      )}
+    </Box>
+  );
+
+  const renderImagePreviews = () =>
+    capturedImages.length > 0 && (
+      <Box sx={{ mt: 2, textAlign: "center" }}>
+        <Typography variant="caption" display="block" gutterBottom>
+          Ảnh đã chụp:
+        </Typography>
+        <Stack
+          direction="row"
+          spacing={1}
+          justifyContent="center"
+          flexWrap="wrap"
+        >
+          {capturedImages.map((imgData, index) => (
+            <Avatar
+              key={index}
+              src={imgData.img}
+              sx={{ width: 56, height: 56 }}
+            />
+          ))}
+          {/* Placeholders for remaining slots */}
+          {[...Array(Math.max(0, requiredImages - capturedImages.length))].map(
+            (_, i) => (
+              <Avatar
+                key={`placeholder-${i}`}
+                sx={{ width: 56, height: 56, bgcolor: "grey.300" }}
+              >
+                <Person />
+              </Avatar>
+            )
+          )}
+        </Stack>
+      </Box>
+    );
+
+  // --- Main Component Render ---
+  return (
+    <Box>
+      {/* Show general loading/error before camera */}
+      {!modelsLoaded && !modelLoadingError && (
         <Box
           sx={{
             display: "flex",
             justifyContent: "center",
-            gap: 2,
+            alignItems: "center",
+            p: 2,
           }}
         >
-          <Button
-            variant="contained"
-            startIcon={<Camera />}
-            disabled={
-              isProcessing ||
-              !modelsLoaded ||
-              !isCameraReady ||
-              capturedImages.length >= maxImages
-            }
-            onClick={captureImage}
-          >
-            {isProcessing ? (
-              <CircularProgress size={24} color="inherit" />
-            ) : (
-              "Chụp ảnh"
-            )}
-          </Button>
-
-          <Button
-            variant="outlined"
-            onClick={resetCapture}
-            disabled={isProcessing || capturedImages.length === 0}
-          >
-            Chụp lại
-          </Button>
+          <CircularProgress size={20} sx={{ mr: 1 }} />
+          <Typography>Đang tải mô hình nhận diện...</Typography>
         </Box>
+      )}
+      {modelLoadingError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {modelLoadingError}
+        </Alert>
+      )}
 
-        {capturedImages.length > 0 && (
-          <Box sx={{ mt: 2, display: "flex", flexWrap: "wrap", gap: 1 }}>
-            {capturedImages.map((img, index) => (
-              <Box
-                key={index}
-                component="img"
-                src={img.img}
-                alt={`Captured ${index + 1}`}
-                sx={{
-                  width: 80,
-                  height: 80,
-                  objectFit: "cover",
-                  borderRadius: 1,
-                }}
-              />
-            ))}
-          </Box>
-        )}
-      </CardContent>
-    </Card>
+      {/* Render Camera and Controls once models attempt to load */}
+      {modelsLoaded && !modelLoadingError && (
+        <>
+          {renderCameraView()}
+          {renderCaptureControls()}
+          {renderImagePreviews()}
+        </>
+      )}
+      {/* Optional: Add a success message when all images are captured */}
+      {capturedImages.length >= requiredImages && (
+        <Alert
+          severity="success"
+          icon={<CheckCircleOutline fontSize="inherit" />}
+          sx={{ mt: 2 }}
+        >
+          Đã chụp đủ {requiredImages} ảnh. Bạn có thể tiếp tục.
+        </Alert>
+      )}
+    </Box>
   );
 };
 

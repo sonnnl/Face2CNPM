@@ -17,7 +17,6 @@ const UserSchema = new Schema({
   advisor_id: { type: Schema.Types.ObjectId, ref: "User" }, // Giáo viên cố vấn cho sinh viên
   school_info: {
     student_id: String, // Mã số sinh viên (MSSV)
-    student_code: String,
     teacher_code: String,
     department: String,
     department_id: { type: Schema.Types.ObjectId, ref: "Department" },
@@ -241,7 +240,7 @@ const AttendanceLogSchema = new Schema({
   student_id: { type: Schema.Types.ObjectId, ref: "User", required: true },
   status: {
     type: String,
-    enum: ["present", "absent", "late", "early_leave"],
+    enum: ["present", "absent"],
     default: "absent",
   },
   recognized: { type: Boolean, default: false },
@@ -253,21 +252,29 @@ const AttendanceLogSchema = new Schema({
 
 // -------------------- STUDENT SCORES --------------------
 const StudentScoreSchema = new Schema({
-  student_id: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  student_id: {
+    type: Schema.Types.ObjectId,
+    ref: "User",
+    required: true,
+  },
   teaching_class_id: {
     type: Schema.Types.ObjectId,
     ref: "TeachingClass",
     required: true,
   },
-  total_sessions: { type: Number, required: true },
-  absent_sessions: { type: Number, default: 0 },
-  attendance_score: { type: Number, default: 10 }, // 10 - (absent * 2)
-  max_absent_allowed: { type: Number, default: 3 },
-  is_failed_due_to_absent: { type: Boolean, default: false },
-  final_score: Number,
-  note: String,
+  total_sessions: { type: Number, default: 0 }, // Tổng số buổi đã hoàn thành của lớp
+  absent_sessions: { type: Number, default: 0 }, // Số buổi vắng
+  attendance_score: { type: Number, default: 10 }, // Điểm chuyên cần
+  max_absent_allowed: { type: Number }, // Số buổi vắng tối đa cho phép (lấy từ TeachingClass)
+  is_failed_due_to_absent: { type: Boolean, default: false }, // Trạng thái cấm thi
   last_updated: { type: Date, default: Date.now },
 });
+
+// Create unique index
+StudentScoreSchema.index(
+  { student_id: 1, teaching_class_id: 1 },
+  { unique: true }
+);
 
 // -------------------- NOTIFICATIONS --------------------
 const NotificationSchema = new Schema({

@@ -733,14 +733,14 @@ const ClassesPage = () => {
   const loadStats = async () => {
     try {
       const mainClassResponse = await axios.get(
-        `${API_URL}/classes/main/statistics`,
+        `${API_URL}/classes/main-statistics`,
         {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
 
       const teachingClassResponse = await axios.get(
-        `${API_URL}/classes/teaching/statistics`,
+        `${API_URL}/classes/teaching-statistics`,
         {
           headers: { Authorization: `Bearer ${token}` },
         }
@@ -1268,7 +1268,9 @@ const ClassesPage = () => {
               multiple
               options={students}
               getOptionLabel={(option) =>
-                `${option.full_name} (${option.student_code || option.email})`
+                `${option.full_name} (${
+                  option.school_info?.student_id || option.email
+                })`
               }
               value={students.filter((student) =>
                 mainClassForm.students.includes(student._id)
@@ -1290,7 +1292,7 @@ const ClassesPage = () => {
                 value.map((option, index) => (
                   <Chip
                     label={`${option.full_name} (${
-                      option.student_code || option.email
+                      option.school_info?.student_id || option.email
                     })`}
                     {...getTagProps({ index })}
                     key={option._id}
@@ -1303,11 +1305,17 @@ const ClassesPage = () => {
                   <Box sx={{ display: "flex", flexDirection: "column" }}>
                     <Typography variant="body1">{option.full_name}</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {option.student_code || option.email}
+                      {option.school_info?.student_id || option.email}
                     </Typography>
                   </Box>
                 </li>
               )}
+              sx={{ width: 200 }}
+              isOptionEqualToValue={(option, value) =>
+                option._id === value._id ||
+                (option.school_info?.student_id || option.email) ===
+                  (value.school_info?.student_id || value.email)
+              }
             />
           </Grid>
         </Grid>
@@ -1497,7 +1505,9 @@ const ClassesPage = () => {
               multiple
               options={students}
               getOptionLabel={(option) =>
-                `${option.full_name} (${option.student_code || option.email})`
+                `${option.full_name} (${
+                  option.school_info?.student_id || option.email
+                })`
               }
               value={students.filter((student) =>
                 teachingClassForm.selected_students.includes(student._id)
@@ -1519,7 +1529,7 @@ const ClassesPage = () => {
                 value.map((option, index) => (
                   <Chip
                     label={`${option.full_name} (${
-                      option.student_code || option.email
+                      option.school_info?.student_id || option.email
                     })`}
                     {...getTagProps({ index })}
                     key={option._id}
@@ -1532,11 +1542,17 @@ const ClassesPage = () => {
                   <Box sx={{ display: "flex", flexDirection: "column" }}>
                     <Typography variant="body1">{option.full_name}</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {option.student_code || option.email}
+                      {option.school_info?.student_id || option.email}
                     </Typography>
                   </Box>
                 </li>
               )}
+              sx={{ width: 200 }}
+              isOptionEqualToValue={(option, value) =>
+                option._id === value._id ||
+                (option.school_info?.student_id || option.email) ===
+                  (value.school_info?.student_id || value.email)
+              }
             />
           </Grid>
           <Grid item xs={12}>
@@ -2084,8 +2100,8 @@ const ClassesPage = () => {
                                     </Typography>
                                     <Typography variant="body2">
                                       MSSV:{" "}
-                                      {student.school_info?.student_code ||
-                                        "Chưa có"}
+                                      {student.school_info?.student_id ||
+                                        "Chưa có mã SV"}
                                     </Typography>
                                     <Typography variant="body2">
                                       Ngày đăng ký:{" "}
@@ -2148,8 +2164,8 @@ const ClassesPage = () => {
                                 <TableRow key={student._id}>
                                   <TableCell>{student.full_name}</TableCell>
                                   <TableCell>
-                                    {student.school_info?.student_code ||
-                                      "Chưa có"}
+                                    {student.school_info?.student_id ||
+                                      "Chưa có mã SV"}
                                   </TableCell>
                                   <TableCell>{student.email}</TableCell>
                                   <TableCell>

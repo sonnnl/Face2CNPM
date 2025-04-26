@@ -7,6 +7,7 @@ const {
   AttendanceSession,
   AttendanceLog,
   ActivityLog,
+  Semester,
 } = require("../models/schemas");
 const mongoose = require("mongoose");
 const { ObjectId } = mongoose.Types;
@@ -27,6 +28,7 @@ exports.getAllMainClasses = async (req, res) => {
     const search = req.query.search || "";
     const department = req.query.department || "";
     const getAllWithoutPagination = req.query.all === "true";
+    const advisorId = req.query.advisor_id || "";
 
     const query = {};
 
@@ -39,6 +41,16 @@ exports.getAllMainClasses = async (req, res) => {
 
     if (department) {
       query.department_id = department;
+    }
+
+    if (advisorId) {
+      if (!mongoose.Types.ObjectId.isValid(advisorId)) {
+        return res.status(400).json({
+          success: false,
+          message: "ID giáo viên cố vấn không hợp lệ",
+        });
+      }
+      query.advisor_id = advisorId;
     }
 
     if (getAllWithoutPagination) {
@@ -151,20 +163,44 @@ exports.createMainClass = async (req, res) => {
 
 // @desc    Cập nhật lớp chính
 // @route   PUT /api/classes/main/:id
-// @access  Private (Admin)
+// @access  Private (Admin, Teacher)
 exports.updateMainClass = async (req, res) => {
   try {
     const { name, code, department_id, advisor_id, students } = req.body;
     const mainClassId = req.params.id;
 
+    // Kiểm tra lớp có tồn tại không
+    const existingClass = await MainClass.findById(mainClassId);
+    if (!existingClass) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy lớp chính",
+      });
+    }
+
+    // Kiểm tra quyền: Admin có thể cập nhật bất kỳ lớp nào, giáo viên chỉ có thể cập nhật lớp mà họ làm cố vấn
+    if (req.user.role !== "admin") {
+      // Nếu không phải admin, kiểm tra xem user có phải là cố vấn của lớp không
+      if (
+        !existingClass.advisor_id ||
+        existingClass.advisor_id.toString() !== req.user.id
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Bạn không có quyền cập nhật lớp này vì bạn không phải là cố vấn của lớp",
+        });
+      }
+    }
+
     // Kiểm tra mã lớp đã tồn tại chưa (trừ lớp hiện tại)
-    if (code) {
-      const existingClass = await MainClass.findOne({
+    if (code && code !== existingClass.class_code) {
+      const duplicateCode = await MainClass.findOne({
         class_code: code,
         _id: { $ne: mainClassId },
       });
 
-      if (existingClass) {
+      if (duplicateCode) {
         return res.status(400).json({
           success: false,
           message: "Mã lớp đã tồn tại",
@@ -172,18 +208,26 @@ exports.updateMainClass = async (req, res) => {
       }
     }
 
+    // Chỉ admin mới có thể thay đổi cố vấn hoặc danh sách sinh viên
+    const updateData = {
+      name,
+      class_code: code,
+      department_id,
+    };
+
+    // Chỉ admin mới được cập nhật advisor và danh sách sinh viên
+    if (req.user.role === "admin") {
+      if (advisor_id) updateData.advisor_id = advisor_id;
+      if (students) updateData.students = students;
+    }
+
     const mainClass = await MainClass.findByIdAndUpdate(
       mainClassId,
-      { name, class_code: code, department_id, advisor_id, students },
+      updateData,
       { new: true, runValidators: true }
-    );
-
-    if (!mainClass) {
-      return res.status(404).json({
-        success: false,
-        message: "Không tìm thấy lớp chính",
-      });
-    }
+    )
+      .populate("advisor_id", "full_name email")
+      .populate("department_id", "name");
 
     res.status(200).json({
       success: true,
@@ -195,6 +239,7 @@ exports.updateMainClass = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Lỗi máy chủ",
+      error: error.message,
     });
   }
 };
@@ -227,7 +272,7 @@ exports.deleteMainClass = async (req, res) => {
 };
 
 // @desc    Lấy thông kê của lớp chính
-// @route   GET /api/classes/main/statistics
+// @route   GET /api/classes/main-statistics
 // @access  Private (Admin)
 exports.getMainClassStatistics = async (req, res) => {
   try {
@@ -459,7 +504,7 @@ exports.getTeachingClassesByTeacher = async (req, res) => {
       .populate("semester_id", "name year")
       .populate({
         path: "students",
-        select: "full_name email school_info.student_code",
+        select: "full_name email school_info.student_id",
       })
       .sort({ createdAt: -1 });
 
@@ -513,30 +558,181 @@ exports.getTeachingClassesByTeacher = async (req, res) => {
 exports.getTeachingClassesByStudent = async (req, res) => {
   try {
     const studentId = req.params.id;
-    const semester_id = req.query.semester_id;
+    const semesterId = req.query.semester; // <<< Đọc req.query.semester thay vì semester_id
+    const academicYear = req.query.academicYear; // Năm học (vd: "2023-2024")
+    const search = req.query.search || "";
 
-    const query = { students: studentId };
-
-    if (semester_id) {
-      query.semester_id = semester_id;
+    // Validate studentId
+    if (!mongoose.Types.ObjectId.isValid(studentId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "ID sinh viên không hợp lệ" });
     }
 
-    const teachingClasses = await TeachingClass.find(query)
-      .populate("subject_id", "name code")
-      .populate("teacher_id", "full_name email")
-      .populate("semester_id", "name year")
-      .sort({ createdAt: -1 });
+    const pipeline = [];
+
+    // --- Xử lý lọc theo Học kỳ hoặc Năm học ---
+    let semesterIdsToFilter = [];
+    if (semesterId && mongoose.Types.ObjectId.isValid(semesterId)) {
+      // Ưu tiên lọc theo semesterId cụ thể nếu được cung cấp
+      semesterIdsToFilter.push(new ObjectId(semesterId));
+    } else if (academicYear) {
+      // Nếu không có semesterId cụ thể nhưng có academicYear
+      const semestersInYear = await Semester.find({
+        academic_year: academicYear,
+      }).select("_id");
+      semesterIdsToFilter = semestersInYear.map((s) => s._id);
+      // Nếu không tìm thấy học kỳ nào trong năm -> không có lớp nào phù hợp
+      if (semesterIdsToFilter.length === 0) {
+        return res.status(200).json({ success: true, count: 0, data: [] });
+      }
+    }
+
+    // Stage 1: Match TeachingClass có sinh viên
+    const matchStage = {
+      $match: {
+        students: new ObjectId(studentId),
+      },
+    };
+    // Thêm điều kiện lọc theo semester_id (nếu có semester_id cụ thể hoặc academicYear)
+    if (semesterIdsToFilter.length > 0) {
+      matchStage.$match.semester_id = { $in: semesterIdsToFilter };
+    }
+    pipeline.push(matchStage);
+
+    // Stage 2: Lookup Subject (giữ nguyên)
+    pipeline.push({
+      $lookup: {
+        from: "subjects",
+        localField: "subject_id",
+        foreignField: "_id",
+        as: "subjectInfo",
+      },
+    });
+    pipeline.push({
+      $unwind: { path: "$subjectInfo", preserveNullAndEmptyArrays: true },
+    });
+
+    // Stage 3: Lookup Teacher (giữ nguyên)
+    pipeline.push({
+      $lookup: {
+        from: "users",
+        localField: "teacher_id",
+        foreignField: "_id",
+        as: "teacherInfo",
+      },
+    });
+    pipeline.push({
+      $unwind: { path: "$teacherInfo", preserveNullAndEmptyArrays: true },
+    });
+
+    // Stage 4: Lookup Semester (giữ nguyên)
+    pipeline.push({
+      $lookup: {
+        from: "semesters",
+        localField: "semester_id",
+        foreignField: "_id",
+        as: "semesterInfo",
+      },
+    });
+    pipeline.push({
+      $unwind: { path: "$semesterInfo", preserveNullAndEmptyArrays: true },
+    });
+
+    // Stage 5: Match với điều kiện search (nếu có - giữ nguyên)
+    if (search) {
+      const searchRegex = { $regex: search, $options: "i" };
+      pipeline.push({
+        $match: {
+          $or: [
+            { class_name: searchRegex },
+            { class_code: searchRegex },
+            { "subjectInfo.name": searchRegex },
+            { "subjectInfo.code": searchRegex },
+            { "teacherInfo.full_name": searchRegex },
+          ],
+        },
+      });
+    }
+
+    // Stage 6: Project (giữ nguyên)
+    pipeline.push({
+      $project: {
+        _id: 1,
+        class_name: 1,
+        class_code: 1,
+        students: 1,
+        total_sessions: 1,
+        max_absent_allowed: 1,
+        schedule: 1,
+        course_start_date: 1,
+        course_end_date: 1,
+        created_at: 1,
+        updated_at: 1,
+        subject_id: {
+          _id: "$subjectInfo._id",
+          name: "$subjectInfo.name",
+          code: "$subjectInfo.code",
+          credits: "$subjectInfo.credits",
+        },
+        teacher_id: {
+          _id: "$teacherInfo._id",
+          full_name: "$teacherInfo.full_name",
+          email: "$teacherInfo.email",
+        },
+        semester_id: {
+          _id: "$semesterInfo._id",
+          name: "$semesterInfo.name",
+          year: "$semesterInfo.year",
+          academic_year: "$semesterInfo.academic_year",
+          start_date: "$semesterInfo.start_date",
+          end_date: "$semesterInfo.end_date",
+        },
+      },
+    });
+
+    // Stage 7: Sort (giữ nguyên)
+    pipeline.push({ $sort: { created_at: -1 } });
+
+    console.log("Executing pipeline:", JSON.stringify(pipeline, null, 2));
+    // Thực thi pipeline
+    const teachingClasses = await TeachingClass.aggregate(pipeline);
+
+    // Tính trạng thái của lớp học dựa vào học kỳ (logic này giữ nguyên)
+    const classesWithStatus = teachingClasses.map((cls) => {
+      const currentDate = new Date();
+      const startDate = cls.semester_id?.start_date
+        ? new Date(cls.semester_id.start_date)
+        : null;
+      const endDate = cls.semester_id?.end_date
+        ? new Date(cls.semester_id.end_date)
+        : null;
+
+      if (startDate && endDate) {
+        if (currentDate < startDate) {
+          cls.status = "chưa bắt đầu";
+        } else if (currentDate > endDate) {
+          cls.status = "đã kết thúc";
+        } else {
+          cls.status = "đang học";
+        }
+      } else {
+        cls.status = "không xác định";
+      }
+      return cls;
+    });
 
     res.status(200).json({
       success: true,
-      count: teachingClasses.length,
-      data: teachingClasses,
+      count: classesWithStatus.length,
+      data: classesWithStatus,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Lỗi khi lấy lớp học của sinh viên:", error);
     res.status(500).json({
       success: false,
       message: "Lỗi máy chủ",
+      error: error.message,
     });
   }
 };
@@ -882,7 +1078,7 @@ exports.regenerateAttendanceSessions = async (req, res) => {
 };
 
 // @desc    Lấy thông kê của lớp giảng dạy
-// @route   GET /api/classes/teaching/statistics
+// @route   GET /api/classes/teaching-statistics
 // @access  Private (Admin)
 exports.getTeachingClassStatistics = async (req, res) => {
   try {
@@ -1179,8 +1375,6 @@ exports.removeStudentFromClass = async (req, res) => {
 exports.getPendingStudents = async (req, res) => {
   try {
     const { id } = req.params;
-
-    console.log("Requested mainClassId:", id);
 
     // Tìm lớp học
     const mainClass = await MainClass.findById(id);
@@ -1503,7 +1697,6 @@ exports.getApprovedStudents = async (req, res) => {
       query.$or = [
         { full_name: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } },
-        { "school_info.student_code": { $regex: search, $options: "i" } },
         { "school_info.student_id": { $regex: search, $options: "i" } },
       ];
     }
@@ -1599,7 +1792,7 @@ exports.getClassStudents = async (req, res) => {
     // Lấy danh sách sinh viên với thông tin chi tiết
     const students = await User.find({
       _id: { $in: teachingClass.students },
-    }).select("_id full_name email avatar_url school_info");
+    }).select("_id full_name email avatar_url school_info.student_id");
 
     // Lấy danh sách bảng điểm của sinh viên trong lớp
     const studentScores = await StudentScore.find({
@@ -1762,7 +1955,7 @@ exports.getClassAttendanceStats = async (req, res) => {
     // Lấy thông tin chi tiết về sinh viên
     const students = await User.find({
       _id: { $in: teachingClass.students },
-    }).select("_id full_name school_info.student_code");
+    }).select("_id full_name school_info.student_id");
 
     // Lấy tất cả log điểm danh
     const attendanceLogs = await AttendanceLog.find({
@@ -1795,7 +1988,7 @@ exports.getClassAttendanceStats = async (req, res) => {
       return {
         student_id: student._id,
         full_name: student.full_name,
-        student_code: student.school_info?.student_code,
+        student_id: student.school_info?.student_id,
         absent_sessions: score ? score.absent_sessions : 0,
         attendance_score: score ? score.attendance_score : 10,
         is_failed_due_to_absent: score ? score.is_failed_due_to_absent : false,

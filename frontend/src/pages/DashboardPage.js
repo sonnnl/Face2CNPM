@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -19,6 +19,9 @@ import {
   ListItemAvatar,
   Avatar,
   Chip,
+  Tooltip,
+  IconButton,
+  useTheme,
 } from "@mui/material";
 import {
   School,
@@ -31,12 +34,17 @@ import {
   Face,
   Today,
   AccessTime,
+  Timeline,
+  Info,
+  Error,
+  Timelapse,
 } from "@mui/icons-material";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
 
 const DashboardPage = () => {
   const navigate = useNavigate();
+  const theme = useTheme();
   const { user, token } = useSelector((state) => state.auth);
 
   const [stats, setStats] = useState({
@@ -46,49 +54,81 @@ const DashboardPage = () => {
     totalAttendedSessions: 0,
     totalSessions: 0,
     attendancePercentage: 0,
+    recentAttendance: [],
+    upcomingClasses: [],
+    attendanceScores: [],
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
         setIsLoading(true);
+        setError(null);
 
         if (user.role === "student") {
-          // Dữ liệu cho sinh viên
+          // Cải thiện xử lý lỗi bằng cách gọi API riêng lẻ thay vì Promise.all
+          let classesData = [];
+          let scoresData = [];
+          let logsData = [];
+          let upcomingData = [];
 
-          // Lấy các lớp mà sinh viên tham gia
-          const classesResponse = await axios.get(
-            `${API_URL}/classes/teaching?student=${user._id}`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
-          );
+          try {
+            // Sửa endpoint để sử dụng đúng API cho sinh viên
+            // Thay vì /classes/teaching?student=${user._id} sai đường dẫn
+            // Dùng /classes/teaching/student/${user._id} đúng định nghĩa route
+            const classesResponse = await axios.get(
+              `${API_URL}/classes/teaching/student/${user._id}`,
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            classesData = classesResponse.data.data || [];
+          } catch (error) {
+            console.error("Lỗi khi lấy dữ liệu lớp học:", error);
+          }
 
-          // Lấy thống kê điểm danh
-          const scoresResponse = await axios.get(
-            `${API_URL}/attendance/student/${user._id}/scores`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
-          );
+          try {
+            // Lấy thống kê điểm danh
+            const scoresResponse = await axios.get(
+              `${API_URL}/attendance/student/${user._id}/scores`,
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            scoresData = scoresResponse.data.data || [];
+          } catch (error) {
+            console.error("Lỗi khi lấy thống kê điểm danh:", error);
+          }
 
-          // Lấy lịch sử điểm danh gần đây
-          const logsResponse = await axios.get(
-            `${API_URL}/attendance/student/${user._id}/logs`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
-          );
+          try {
+            // Lấy lịch sử điểm danh gần đây
+            const logsResponse = await axios.get(
+              `${API_URL}/attendance/student/${user._id}/logs?limit=10`,
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            logsData = logsResponse.data.data || [];
+          } catch (error) {
+            console.error("Lỗi khi lấy lịch sử điểm danh:", error);
+          }
+
+          // Không sử dụng endpoint upcoming nếu không tồn tại
+          // try {
+          //   // Lấy các lớp sắp tới
+          //   const upcomingResponse = await axios.get(
+          //     `${API_URL}/classes/upcoming?student=${user._id}&limit=3`,
+          //     { headers: { Authorization: `Bearer ${token}` } }
+          //   );
+          //   upcomingData = upcomingResponse.data.data || [];
+          // } catch (error) {
+          //   console.error("Lỗi khi lấy lớp học sắp tới:", error);
+          // }
 
           // Tính toán tổng số buổi đã tham gia
-          const totalAttended = scoresResponse.data.data.reduce(
+          const totalAttended = scoresData.reduce(
             (total, score) =>
               total + (score.total_sessions - score.absent_sessions),
             0
           );
 
-          const totalSessions = scoresResponse.data.data.reduce(
+          const totalSessions = scoresData.reduce(
             (total, score) => total + score.total_sessions,
             0
           );
@@ -97,15 +137,52 @@ const DashboardPage = () => {
           const today = new Date();
           today.setHours(0, 0, 0, 0);
 
-          const todayAttendance = logsResponse.data.data.filter((log) => {
+          const todayAttendance = logsData.filter((log) => {
+            if (!log.timestamp) return false;
+
             const logDate = new Date(log.timestamp);
             logDate.setHours(0, 0, 0, 0);
             return logDate.getTime() === today.getTime();
           });
 
+          // Xử lý dữ liệu phần trăm cho từng lớp học
+          const classesWithPercentage = classesData.map((classItem) => {
+            const classScore = scoresData.find(
+              (score) =>
+                (score.teaching_class_id?._id || score.teaching_class_id) ===
+                classItem._id
+            );
+            return {
+              ...classItem,
+              // Lấy các trường cần thiết từ classScore hoặc classItem làm fallback
+              attendanceStats: classScore
+                ? {
+                    attended: classScore.attended_sessions || 0,
+                    total: classScore.total_sessions || 0, // Số buổi đã hoàn thành
+                    percentage: classScore.attendance_percentage || 0,
+                    completed_sessions: classScore.completed_sessions || 0,
+                    total_planned_sessions:
+                      classScore.total_planned_sessions ||
+                      classItem.total_sessions ||
+                      0, // Lấy total_sessions từ classItem nếu score chưa có
+                    absent: classScore.absent_sessions || 0, // Thêm số buổi vắng
+                    is_failed: classScore.is_failed_due_to_absent || false, // Thêm trạng thái cấm thi
+                  }
+                : {
+                    attended: 0,
+                    total: 0,
+                    percentage: 0,
+                    completed_sessions: 0,
+                    total_planned_sessions: classItem.total_sessions || 0,
+                    absent: 0,
+                    is_failed: false,
+                  },
+            };
+          });
+
           setStats({
-            classes: classesResponse.data.data || [],
-            attendanceSessions: logsResponse.data.data || [],
+            classes: classesWithPercentage || [],
+            attendanceSessions: logsData || [],
             todayAttendance,
             totalAttendedSessions: totalAttended,
             totalSessions,
@@ -113,13 +190,16 @@ const DashboardPage = () => {
               totalSessions > 0
                 ? Math.round((totalAttended / totalSessions) * 100)
                 : 0,
+            recentAttendance: logsData.slice(0, 5),
+            upcomingClasses: upcomingData,
+            attendanceScores: scoresData,
           });
         } else if (user.role === "teacher") {
           // Dữ liệu cho giáo viên
 
           // Lấy các lớp do giáo viên dạy
           const classesResponse = await axios.get(
-            `${API_URL}/classes/teaching?teacher=${user._id}`,
+            `${API_URL}/classes/teaching/teacher/${user._id}`,
             {
               headers: { Authorization: `Bearer ${token}` },
             }
@@ -188,12 +268,26 @@ const DashboardPage = () => {
         setIsLoading(false);
       } catch (error) {
         console.error("Lỗi khi tải dữ liệu dashboard:", error);
+        setError("Không thể tải dữ liệu. Vui lòng thử lại sau.");
         setIsLoading(false);
       }
     };
 
     fetchDashboardData();
   }, [user, token]);
+
+  // Xử lý thông tin sinh viên
+  const studentInfo = useMemo(() => {
+    if (user.role !== "student") return null;
+
+    return {
+      name: user.full_name || "Sinh viên",
+      studentId: user.school_info?.student_id || "Chưa cập nhật",
+      department: user.school_info?.department || "Chưa cập nhật",
+      registeredFace: user.faceFeatures?.descriptors?.length > 0,
+      totalClasses: stats.classes.length,
+    };
+  }, [user, stats.classes.length]);
 
   if (isLoading) {
     return (
@@ -204,6 +298,30 @@ const DashboardPage = () => {
         minHeight="60vh"
       >
         <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box
+        display="flex"
+        flexDirection="column"
+        justifyContent="center"
+        alignItems="center"
+        minHeight="60vh"
+      >
+        <Error color="error" sx={{ fontSize: 60, mb: 2 }} />
+        <Typography variant="h6" color="error" gutterBottom>
+          {error}
+        </Typography>
+        <Button
+          variant="contained"
+          onClick={() => window.location.reload()}
+          startIcon={<Timelapse />}
+        >
+          Tải lại trang
+        </Button>
       </Box>
     );
   }
@@ -222,31 +340,62 @@ const DashboardPage = () => {
     }
   };
 
-  // Dashboard cho sinh viên
+  // Dashboard cho sinh viên - phần được tối ưu
   const renderStudentDashboard = () => (
     <Grid container spacing={3}>
       <Grid item xs={12} md={8}>
-        <Paper sx={{ p: 2, mb: 3 }}>
+        <Paper
+          sx={{
+            p: 2,
+            mb: 3,
+            borderRadius: theme.shape.borderRadius,
+            boxShadow: theme.shadows[2],
+            background: `linear-gradient(to right, ${theme.palette.primary.light}, ${theme.palette.primary.main})`,
+          }}
+        >
           <Box display="flex" alignItems="center" mb={2}>
-            <Person sx={{ fontSize: 40, mr: 2, color: "primary.main" }} />
+            <Avatar
+              sx={{
+                width: 60,
+                height: 60,
+                mr: 2,
+                bgcolor: theme.palette.primary.dark,
+                boxShadow: theme.shadows[3],
+                border: `2px solid ${theme.palette.background.paper}`,
+              }}
+            >
+              <Person sx={{ fontSize: 40, color: "white" }} />
+            </Avatar>
             <Box>
-              <Typography variant="h5">Xin chào, {user.full_name}!</Typography>
-              <Typography variant="body2" color="textSecondary">
-                Mã sinh viên: {user.student_code}
+              <Typography variant="h5" sx={{ color: "white", fontWeight: 600 }}>
+                Xin chào, {studentInfo.name}!
+              </Typography>
+              <Typography variant="body2" sx={{ color: "white", opacity: 0.9 }}>
+                Mã sinh viên: {studentInfo.studentId} | Khoa:{" "}
+                {studentInfo.department}
               </Typography>
             </Box>
           </Box>
 
           <Grid container spacing={2}>
             <Grid item xs={12} sm={4}>
-              <Card>
+              <Card
+                sx={{
+                  boxShadow: theme.shadows[3],
+                  borderRadius: theme.shape.borderRadius,
+                }}
+              >
                 <CardContent>
-                  <Typography color="textSecondary" gutterBottom>
+                  <Typography
+                    color="textSecondary"
+                    gutterBottom
+                    fontSize="0.875rem"
+                  >
                     Số lớp đang học
                   </Typography>
                   <Box display="flex" alignItems="center">
                     <School
-                      sx={{ fontSize: 32, mr: 2, color: "primary.main" }}
+                      sx={{ fontSize: 36, mr: 2, color: "primary.main" }}
                     />
                     <Typography variant="h4">{stats.classes.length}</Typography>
                   </Box>
@@ -255,14 +404,32 @@ const DashboardPage = () => {
             </Grid>
 
             <Grid item xs={12} sm={4}>
-              <Card>
+              <Card
+                sx={{
+                  boxShadow: theme.shadows[3],
+                  borderRadius: theme.shape.borderRadius,
+                }}
+              >
                 <CardContent>
-                  <Typography color="textSecondary" gutterBottom>
+                  <Typography
+                    color="textSecondary"
+                    gutterBottom
+                    fontSize="0.875rem"
+                  >
                     Tỷ lệ tham gia
                   </Typography>
                   <Box display="flex" alignItems="center">
                     <CheckCircle
-                      sx={{ fontSize: 32, mr: 2, color: "success.main" }}
+                      sx={{
+                        fontSize: 36,
+                        mr: 2,
+                        color:
+                          stats.attendancePercentage >= 80
+                            ? "success.main"
+                            : stats.attendancePercentage >= 50
+                            ? "warning.main"
+                            : "error.main",
+                      }}
                     />
                     <Typography variant="h4">
                       {stats.attendancePercentage}%
@@ -273,14 +440,23 @@ const DashboardPage = () => {
             </Grid>
 
             <Grid item xs={12} sm={4}>
-              <Card>
+              <Card
+                sx={{
+                  boxShadow: theme.shadows[3],
+                  borderRadius: theme.shape.borderRadius,
+                }}
+              >
                 <CardContent>
-                  <Typography color="textSecondary" gutterBottom>
+                  <Typography
+                    color="textSecondary"
+                    gutterBottom
+                    fontSize="0.875rem"
+                  >
                     Buổi đã tham gia
                   </Typography>
                   <Box display="flex" alignItems="center">
                     <EventAvailable
-                      sx={{ fontSize: 32, mr: 2, color: "info.main" }}
+                      sx={{ fontSize: 36, mr: 2, color: "info.main" }}
                     />
                     <Typography variant="h4">
                       {stats.totalAttendedSessions}/{stats.totalSessions}
@@ -292,11 +468,151 @@ const DashboardPage = () => {
           </Grid>
         </Paper>
 
-        <Card>
+        <Card
+          sx={{
+            mb: 3,
+            borderRadius: theme.shape.borderRadius,
+            boxShadow: theme.shadows[2],
+          }}
+        >
           <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Các lớp học của bạn
-            </Typography>
+            <Box
+              display="flex"
+              justifyContent="space-between"
+              alignItems="center"
+              mb={2}
+            >
+              <Typography variant="h6">Điểm chuyên cần của bạn</Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => navigate("/student/scores")}
+                endIcon={<Timeline />}
+              >
+                Xem tất cả
+              </Button>
+            </Box>
+
+            {stats.attendanceScores && stats.attendanceScores.length > 0 ? (
+              <List>
+                {stats.attendanceScores.slice(0, 3).map((score) => (
+                  <ListItem
+                    key={score._id}
+                    sx={{
+                      mb: 1,
+                      borderLeft: `4px solid ${
+                        score.is_failed_due_to_absent
+                          ? theme.palette.error.main
+                          : score.attendance_percentage >= 80
+                          ? theme.palette.success.main
+                          : theme.palette.warning.main
+                      }`,
+                      borderRadius: "0 4px 4px 0",
+                      bgcolor: "background.paper",
+                    }}
+                  >
+                    <ListItemAvatar>
+                      <Avatar
+                        sx={{
+                          bgcolor: score.is_failed_due_to_absent
+                            ? "error.main"
+                            : "primary.main",
+                        }}
+                      >
+                        {score.attendance_score >= 8 ? (
+                          <CheckCircle />
+                        ) : (
+                          <School />
+                        )}
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={
+                        <Typography variant="subtitle2">
+                          {score.class_info?.name || "Lớp học"} -{" "}
+                          {score.class_info?.subject?.name || "Môn học"}
+                        </Typography>
+                      }
+                      secondary={
+                        <>
+                          <Typography variant="body2" component="span">
+                            {score.attendance_description ||
+                              `${score.attended_sessions || 0}/${
+                                score.total_sessions || 0
+                              } buổi`}
+                          </Typography>
+                          <br />
+                          <Typography
+                            variant="body2"
+                            component="span"
+                            color={
+                              score.is_failed_due_to_absent
+                                ? "error.main"
+                                : "text.secondary"
+                            }
+                          >
+                            {score.attendance_status ||
+                              (score.is_failed_due_to_absent
+                                ? "Cấm thi"
+                                : "Đủ điều kiện dự thi")}
+                          </Typography>
+                        </>
+                      }
+                    />
+                    <Box>
+                      <Typography
+                        variant="h6"
+                        color={
+                          score.attendance_score >= 8
+                            ? "success.main"
+                            : score.attendance_score >= 5
+                            ? "warning.main"
+                            : "error.main"
+                        }
+                      >
+                        {score.attendance_score}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Điểm
+                      </Typography>
+                    </Box>
+                  </ListItem>
+                ))}
+              </List>
+            ) : (
+              <Typography variant="body2" color="textSecondary">
+                Chưa có thông tin điểm chuyên cần
+              </Typography>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card
+          sx={{
+            mb: 3,
+            borderRadius: theme.shape.borderRadius,
+            boxShadow: theme.shadows[2],
+          }}
+        >
+          <CardContent>
+            <Box
+              display="flex"
+              justifyContent="space-between"
+              alignItems="center"
+              mb={2}
+            >
+              <Typography variant="h6">Các lớp học của bạn</Typography>
+              {stats.classes.length > 0 && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => navigate("/student/classes")}
+                  endIcon={<Timeline />}
+                >
+                  Xem tất cả
+                </Button>
+              )}
+            </Box>
 
             {stats.classes.length === 0 ? (
               <Typography variant="body2" color="textSecondary">
@@ -304,11 +620,20 @@ const DashboardPage = () => {
               </Typography>
             ) : (
               <Grid container spacing={2}>
-                {stats.classes.map((classItem) => (
+                {stats.classes.slice(0, 4).map((classItem) => (
                   <Grid item xs={12} sm={6} key={classItem._id}>
-                    <Card variant="outlined">
+                    <Card
+                      variant="outlined"
+                      sx={{
+                        transition: "all 0.3s ease",
+                        "&:hover": {
+                          boxShadow: theme.shadows[4],
+                          transform: "translateY(-4px)",
+                        },
+                      }}
+                    >
                       <CardContent>
-                        <Typography variant="h6" noWrap>
+                        <Typography variant="h6" noWrap fontWeight={500}>
                           {classItem.class_name}
                         </Typography>
                         <Typography
@@ -321,28 +646,87 @@ const DashboardPage = () => {
                             "Chưa có thông tin môn học"}{" "}
                           ({classItem.subject_id?.code || "N/A"})
                         </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          <strong>Lớp chính:</strong>{" "}
-                          {classItem.main_class_id?.name || "Chưa có thông tin"}{" "}
-                          ({classItem.main_class_id?.class_code || ""})
-                        </Typography>
-                        <Box mt={1} display="flex" alignItems="center">
-                          <Person sx={{ mr: 1, fontSize: 18 }} />
-                          <Typography variant="body2">
-                            {classItem.teacher_id?.full_name ||
-                              "Chưa có giáo viên"}
+                        {classItem.main_class_id && (
+                          <Typography variant="body2" color="textSecondary">
+                            <strong>Lớp:</strong>{" "}
+                            {classItem.main_class_id?.name}{" "}
+                            {classItem.main_class_id?.class_code
+                              ? `(${classItem.main_class_id.class_code})`
+                              : ""}
                           </Typography>
+                        )}
+                        <Typography
+                          variant="body2"
+                          color="textSecondary"
+                          sx={{ mt: 1 }}
+                        >
+                          <strong>Tiến độ:</strong>{" "}
+                          {classItem.attendanceStats.completed_sessions} /{" "}
+                          {classItem.attendanceStats.total_planned_sessions}{" "}
+                          buổi đã hoàn thành
+                        </Typography>
+                        <Box mt={1} display="flex" alignItems="center" gap={1}>
+                          <Tooltip
+                            title={
+                              classItem.attendanceStats.is_failed
+                                ? "Cấm thi do vắng quá nhiều"
+                                : classItem.attendanceStats.percentage >= 80
+                                ? "Tốt: Tham gia đầy đủ các buổi đã học"
+                                : classItem.attendanceStats.percentage >= 50
+                                ? "Cảnh báo: Cần đảm bảo tham gia đủ buổi"
+                                : "Yếu: Đã vắng nhiều buổi"
+                            }
+                          >
+                            <Chip
+                              size="small"
+                              icon={<CheckCircle />}
+                              label={`Tham gia: ${classItem.attendanceStats.attended}/${classItem.attendanceStats.total} (${classItem.attendanceStats.percentage}%)`}
+                              color={
+                                classItem.attendanceStats.is_failed
+                                  ? "error"
+                                  : classItem.attendanceStats.percentage >= 80
+                                  ? "success"
+                                  : classItem.attendanceStats.percentage >= 50
+                                  ? "warning"
+                                  : "default" // Hoặc màu khác cho tỷ lệ thấp
+                              }
+                            />
+                          </Tooltip>
+                          <Tooltip
+                            title={`Số buổi vắng: ${classItem.attendanceStats.absent}`}
+                          >
+                            <Chip
+                              size="small"
+                              label={`Vắng: ${classItem.attendanceStats.absent}`}
+                              color={
+                                classItem.attendanceStats.absent > 0
+                                  ? "error"
+                                  : "default"
+                              }
+                            />
+                          </Tooltip>
                         </Box>
                       </CardContent>
                       <CardActions>
                         <Button
                           size="small"
+                          variant="outlined"
                           onClick={() =>
                             navigate(`/student/attendance/${classItem._id}`)
                           }
                         >
                           Xem điểm danh
                         </Button>
+                        <Tooltip title="Thông tin chi tiết">
+                          <IconButton
+                            size="small"
+                            onClick={() =>
+                              navigate(`/student/classes/${classItem._id}`)
+                            }
+                          >
+                            <Info fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       </CardActions>
                     </Card>
                   </Grid>
@@ -350,35 +734,114 @@ const DashboardPage = () => {
               </Grid>
             )}
           </CardContent>
-
-          {stats.classes.length > 0 && (
-            <CardActions>
-              <Button size="small" onClick={() => navigate("/student/classes")}>
-                Xem tất cả lớp học
-              </Button>
-            </CardActions>
-          )}
         </Card>
+
+        {/* Phần hiển thị lớp học sắp tới chỉ hiển thị khi có dữ liệu */}
+        {stats.upcomingClasses && stats.upcomingClasses.length > 0 && (
+          <Card
+            sx={{
+              borderRadius: theme.shape.borderRadius,
+              boxShadow: theme.shadows[2],
+            }}
+          >
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Lớp học sắp tới
+              </Typography>
+              <List>
+                {stats.upcomingClasses.map((session) => (
+                  <ListItem key={session._id}>
+                    <ListItemAvatar>
+                      <Avatar sx={{ bgcolor: theme.palette.primary.light }}>
+                        <Event />
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={
+                        session.teaching_class_id?.class_name || "Lớp học"
+                      }
+                      secondary={`${new Date(
+                        session.date || new Date()
+                      ).toLocaleDateString("vi-VN")} - Buổi ${
+                        session.session_number || "?"
+                      }`}
+                    />
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color="primary"
+                      onClick={() =>
+                        navigate(
+                          `/student/attendance/${
+                            session.teaching_class_id?._id || ""
+                          }`
+                        )
+                      }
+                    >
+                      Chi tiết
+                    </Button>
+                  </ListItem>
+                ))}
+              </List>
+            </CardContent>
+          </Card>
+        )}
       </Grid>
 
       <Grid item xs={12} md={4}>
-        <Card sx={{ mb: 3 }}>
+        <Card
+          sx={{
+            mb: 3,
+            borderRadius: theme.shape.borderRadius,
+            boxShadow: theme.shadows[2],
+          }}
+        >
           <CardContent>
             <Typography variant="h6" gutterBottom>
               Hôm nay ({new Date().toLocaleDateString("vi-VN")})
             </Typography>
 
             {stats.todayAttendance.length === 0 ? (
-              <Typography variant="body2" color="textSecondary">
-                Không có điểm danh nào hôm nay
-              </Typography>
+              <Box
+                display="flex"
+                flexDirection="column"
+                alignItems="center"
+                py={2}
+                sx={{
+                  color: "text.secondary",
+                  bgcolor: "background.default",
+                  borderRadius: 1,
+                }}
+              >
+                <Today sx={{ fontSize: 40, mb: 1, opacity: 0.7 }} />
+                <Typography variant="body2" textAlign="center">
+                  Không có điểm danh nào hôm nay
+                </Typography>
+              </Box>
             ) : (
               <List dense>
                 {stats.todayAttendance.map((log) => (
-                  <ListItem key={log._id}>
+                  <ListItem
+                    key={log._id}
+                    sx={{
+                      bgcolor:
+                        log.status === "present"
+                          ? "success.light"
+                          : "error.light",
+                      mb: 1,
+                      borderRadius: 1,
+                    }}
+                  >
                     <ListItemAvatar>
-                      <Avatar>
-                        <Event />
+                      <Avatar
+                        sx={{
+                          bgcolor:
+                            log.status === "present"
+                              ? theme.palette.success.main
+                              : theme.palette.error.main,
+                        }}
+                      >
+                        {log.status === "present" ? <CheckCircle /> : <Error />}
                       </Avatar>
                     </ListItemAvatar>
                     <ListItemText
@@ -399,20 +862,40 @@ const DashboardPage = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          sx={{
+            borderRadius: theme.shape.borderRadius,
+            boxShadow: theme.shadows[2],
+          }}
+        >
           <CardContent>
             <Typography variant="h6" gutterBottom>
               Điểm danh gần đây
             </Typography>
 
-            {stats.attendanceSessions.length === 0 ? (
+            {stats.recentAttendance.length === 0 ? (
               <Typography variant="body2" color="textSecondary">
                 Chưa có lịch sử điểm danh
               </Typography>
             ) : (
               <List dense>
-                {stats.attendanceSessions.slice(0, 5).map((log) => (
-                  <ListItem key={log._id}>
+                {stats.recentAttendance.map((log) => (
+                  <ListItem
+                    key={log._id}
+                    sx={{
+                      mb: 1,
+                      borderLeft: `4px solid ${
+                        log.status === "present"
+                          ? theme.palette.success.main
+                          : theme.palette.error.main
+                      }`,
+                      borderRadius: "0 4px 4px 0",
+                      transition: "all 0.2s ease",
+                      "&:hover": {
+                        bgcolor: "action.hover",
+                      },
+                    }}
+                  >
                     <ListItemAvatar>
                       <Avatar>
                         <Event />
@@ -435,16 +918,25 @@ const DashboardPage = () => {
             )}
           </CardContent>
 
-          {!user.faceFeatures?.descriptors?.length && (
-            <Box p={2} bgcolor="action.hover">
-              <Typography variant="subtitle2" gutterBottom>
+          {!studentInfo.registeredFace && (
+            <Box
+              p={2}
+              sx={{
+                bgcolor: theme.palette.warning.light,
+                borderRadius: `0 0 ${theme.shape.borderRadius}px ${theme.shape.borderRadius}px`,
+              }}
+            >
+              <Typography variant="subtitle2" gutterBottom fontWeight={500}>
                 Bạn chưa đăng ký khuôn mặt cho điểm danh tự động
               </Typography>
               <Button
                 variant="contained"
+                color="warning"
                 startIcon={<Face />}
                 size="small"
                 onClick={() => navigate("/register-face")}
+                fullWidth
+                sx={{ mt: 1 }}
               >
                 Đăng ký ngay
               </Button>
@@ -554,11 +1046,15 @@ const DashboardPage = () => {
                             "Chưa có thông tin môn học"}{" "}
                           ({classItem.subject_id?.code || "N/A"})
                         </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          <strong>Lớp:</strong>{" "}
-                          {classItem.main_class_id?.name || "Chưa có thông tin"}{" "}
-                          ({classItem.main_class_id?.class_code || ""})
-                        </Typography>
+                        {classItem.main_class_id && (
+                          <Typography variant="body2" color="textSecondary">
+                            <strong>Lớp chính:</strong>{" "}
+                            {classItem.main_class_id?.name}{" "}
+                            {classItem.main_class_id?.class_code
+                              ? `(${classItem.main_class_id.class_code})`
+                              : ""}
+                          </Typography>
+                        )}
                         <Typography variant="body2" color="textSecondary">
                           <strong>Học kỳ:</strong>{" "}
                           {classItem.semester_id?.name || "Chưa có thông tin"}{" "}
@@ -678,11 +1174,17 @@ const DashboardPage = () => {
                     <Chip
                       size="small"
                       color={
-                        session.status === "active" ? "success" : "default"
+                        session.status === "active"
+                          ? "success"
+                          : session.status === "pending"
+                          ? "warning"
+                          : "default"
                       }
                       label={
                         session.status === "active"
                           ? "Đang diễn ra"
+                          : session.status === "pending"
+                          ? "Sắp diễn ra"
                           : "Đã kết thúc"
                       }
                     />
@@ -857,11 +1359,17 @@ const DashboardPage = () => {
                     <Chip
                       size="small"
                       color={
-                        session.status === "active" ? "success" : "default"
+                        session.status === "active"
+                          ? "success"
+                          : session.status === "pending"
+                          ? "warning"
+                          : "default"
                       }
                       label={
                         session.status === "active"
                           ? "Đang diễn ra"
+                          : session.status === "pending"
+                          ? "Sắp diễn ra"
                           : "Đã kết thúc"
                       }
                     />

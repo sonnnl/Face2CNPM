@@ -46,7 +46,7 @@ const RegisterPage = () => {
     role: "",
     advisor_id: null,
     school_info: {
-      student_code: "",
+      student_id: "",
       teacher_code: "",
       department: "",
     },
@@ -59,7 +59,7 @@ const RegisterPage = () => {
     full_name: "",
     role: "",
     advisor_id: "",
-    "school_info.student_code": "",
+    "school_info.student_id": "",
   });
 
   const [showPassword, setShowPassword] = useState(false);
@@ -177,9 +177,9 @@ const RegisterPage = () => {
       valid = false;
     }
 
-    // Kiểm tra mã số sinh viên nếu là sinh viên
-    if (formData.role === "student" && !formData.school_info.student_code) {
-      errors["school_info.student_code"] = "Mã số sinh viên là bắt buộc";
+    // Kiểm tra mã số sinh viên (MSSV) nếu là sinh viên
+    if (formData.role === "student" && !formData.school_info.student_id) {
+      errors["school_info.student_id"] = "Mã số sinh viên (MSSV) là bắt buộc";
       valid = false;
     }
 
@@ -298,14 +298,14 @@ const RegisterPage = () => {
                   margin="normal"
                   required
                   fullWidth
-                  id="student_code"
-                  label="Mã số sinh viên"
-                  name="school_info.student_code"
-                  value={formData.school_info.student_code}
+                  id="student_id"
+                  label="Mã số sinh viên (MSSV)"
+                  name="school_info.student_id"
+                  value={formData.school_info.student_id}
                   onChange={handleChange}
                   variant="outlined"
-                  error={!!formErrors["school_info.student_code"]}
-                  helperText={formErrors["school_info.student_code"]}
+                  error={!!formErrors["school_info.student_id"]}
+                  helperText={formErrors["school_info.student_id"]}
                 />
 
                 <FormControl

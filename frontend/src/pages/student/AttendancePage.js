@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { useSnackbar } from "notistack";
-import axios from "axios";
 import {
   Box,
   Typography,
@@ -45,9 +44,12 @@ import {
   Description,
   Book,
   CloudDownload,
+  Warning,
+  Error,
 } from "@mui/icons-material";
 
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+// Import studentService thay vì gọi API trực tiếp
+import studentService from "../../services/studentService";
 
 const AttendanceStatusChip = ({ status }) => {
   switch (status) {
@@ -101,6 +103,12 @@ const StudentAttendancePage = () => {
     late: 0,
     attendanceRate: 0,
   });
+  const [attendanceScore, setAttendanceScore] = useState({
+    score: 0,
+    maxScore: 10,
+    passed: true,
+    message: "",
+  });
   const [isLoading, setIsLoading] = useState(true);
 
   // Load dữ liệu ban đầu
@@ -108,47 +116,83 @@ const StudentAttendancePage = () => {
     try {
       setIsLoading(true);
 
-      // Lấy thông tin lớp học
-      const classResponse = await axios.get(
-        `${API_URL}/classes/teaching/${classId}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      setClassInfo(classResponse.data.data);
+      // Lấy thông tin lớp học sử dụng service
+      const classResponse = await studentService.getClassDetail(classId, token);
 
-      // Lấy lịch sử điểm danh của sinh viên trong lớp học
-      const logsResponse = await axios.get(
-        `${API_URL}/attendance/student/${user._id}/logs?teaching_class=${classId}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
+      if (!classResponse.success) {
+        enqueueSnackbar(classResponse.error, { variant: "error" });
+        return;
+      }
+
+      setClassInfo(classResponse.data);
+
+      // Lấy thống kê điểm danh sử dụng service
+      const attendanceResponse = await studentService.getAttendanceStats(
+        user._id,
+        classId,
+        token
       );
 
-      const logs = logsResponse.data.data || [];
+      if (!attendanceResponse.success) {
+        enqueueSnackbar(attendanceResponse.error, { variant: "error" });
+        return;
+      }
+
+      const { logs, stats } = attendanceResponse.data;
       setAttendanceLogs(logs);
+      setAttendanceStats(stats);
 
-      // Tính toán thống kê điểm danh
-      let present = 0,
-        absent = 0,
-        late = 0;
+      // Lấy điểm chuyên cần
+      const scoresResponse = await studentService.getAttendanceScores(
+        user._id,
+        token
+      );
 
-      logs.forEach((log) => {
-        if (log.status === "present") present++;
-        else if (log.status === "absent") absent++;
-        else if (log.status === "late") late++;
-      });
+      if (scoresResponse.success) {
+        // Tìm điểm của lớp hiện tại
+        const classScore = scoresResponse.data.find(
+          (score) =>
+            score.teaching_class_id?._id === classId ||
+            score.teaching_class_id === classId
+        );
 
-      const total = logs.length;
-      const attendanceRate = total > 0 ? ((present + late) / total) * 100 : 0;
+        if (classScore) {
+          const maxAbsentAllowed =
+            classScore.max_absent_allowed ||
+            classResponse.data?.max_absent_allowed ||
+            3;
+          const isEligible = studentService.checkExamEligibility(
+            classScore.absent_sessions,
+            maxAbsentAllowed
+          );
 
-      setAttendanceStats({
-        total,
-        present,
-        absent,
-        late,
-        attendanceRate,
-      });
+          setAttendanceScore({
+            score: classScore.attendance_score,
+            maxScore: 10,
+            passed: !classScore.is_failed_due_to_absent && isEligible,
+            message: isEligible
+              ? "Đủ điều kiện dự thi"
+              : `Cảnh báo: Vắng quá ${maxAbsentAllowed} buổi, có thể bị cấm thi`,
+          });
+        } else {
+          // Tính toán điểm dựa trên số buổi vắng nếu không có trong db
+          const score = studentService.calculateAttendanceScore(stats.absent);
+          const maxAbsentAllowed = classResponse.data?.max_absent_allowed || 3;
+          const isEligible = studentService.checkExamEligibility(
+            stats.absent,
+            maxAbsentAllowed
+          );
+
+          setAttendanceScore({
+            score,
+            maxScore: 10,
+            passed: isEligible,
+            message: isEligible
+              ? "Đủ điều kiện dự thi"
+              : `Cảnh báo: Vắng quá ${maxAbsentAllowed} buổi, có thể bị cấm thi`,
+          });
+        }
+      }
     } catch (error) {
       console.error("Lỗi khi tải dữ liệu:", error);
       enqueueSnackbar("Lỗi khi tải dữ liệu điểm danh", { variant: "error" });
@@ -163,345 +207,264 @@ const StudentAttendancePage = () => {
 
   // Xuất danh sách điểm danh
   const handleExportAttendance = () => {
-    try {
-      // Chuẩn bị dữ liệu CSV
-      const attendanceData = attendanceLogs.map((log, index) => {
-        const session = log.session_id;
-        const date = new Date(session.date).toLocaleDateString("vi-VN");
-        const time = `${session.start_time} - ${session.end_time}`;
+    const result = studentService.exportAttendanceToCSV(
+      attendanceLogs,
+      classInfo
+    );
 
-        return {
-          STT: index + 1,
-          Buổi: session.title || `Buổi ${index + 1}`,
-          Ngày: date,
-          "Thời gian": time,
-          "Trạng thái":
-            log.status === "present"
-              ? "Có mặt"
-              : log.status === "late"
-              ? "Đi muộn"
-              : "Vắng mặt",
-          "Ghi chú": log.note || "",
-        };
-      });
-
-      const header = [
-        "STT",
-        "Buổi",
-        "Ngày",
-        "Thời gian",
-        "Trạng thái",
-        "Ghi chú",
-      ];
-      const csvContent =
-        "data:text/csv;charset=utf-8," +
-        [
-          header.join(","),
-          ...attendanceData.map((row) =>
-            [
-              row.STT,
-              row.Buổi,
-              row.Ngày,
-              row["Thời gian"],
-              row["Trạng thái"],
-              row["Ghi chú"],
-            ].join(",")
-          ),
-        ].join("\n");
-
-      const encodedUri = encodeURI(csvContent);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute(
-        "download",
-        `diem_danh_${classInfo?.class_name}_${user.full_name}.csv`
-      );
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      enqueueSnackbar("Xuất danh sách điểm danh thành công", {
+    if (result.success) {
+      enqueueSnackbar("Đã xuất dữ liệu điểm danh thành công", {
         variant: "success",
       });
-    } catch (error) {
-      console.error("Lỗi khi xuất danh sách điểm danh:", error);
-      enqueueSnackbar("Lỗi khi xuất danh sách điểm danh", { variant: "error" });
+    } else {
+      enqueueSnackbar(result.error || "Lỗi khi xuất dữ liệu", {
+        variant: "error",
+      });
     }
   };
 
-  // Tính điểm chuyên cần dựa trên tỷ lệ tham gia
+  // Tính điểm chuyên cần
   const calculateAttendanceScore = () => {
-    // Nếu có ít hơn 3 buổi học thì không tính điểm
-    if (attendanceStats.total < 3) return "N/A";
-
-    const rate = attendanceStats.attendanceRate;
-    if (rate >= 90) return 10;
-    if (rate >= 80) return 9;
-    if (rate >= 70) return 8;
-    if (rate >= 60) return 7;
-    if (rate >= 50) return 6;
-    if (rate >= 40) return 5;
-    return Math.floor(rate / 10);
+    const { absent } = attendanceStats;
+    return studentService.calculateAttendanceScore(absent);
   };
 
+  // Lấy icon và màu sắc trạng thái điểm danh
+  const getAttendanceStatusInfo = () => {
+    const status = studentService.getAttendanceStatus(attendanceStats);
+
+    return {
+      icon:
+        status.status === "success" ? (
+          <CheckCircle fontSize="large" color="success" />
+        ) : status.status === "warning" ? (
+          <Warning fontSize="large" color="warning" />
+        ) : (
+          <Error fontSize="large" color="error" />
+        ),
+      color: status.status,
+      message: status.message,
+    };
+  };
+
+  // Hiển thị màn hình loading
   if (isLoading) {
     return (
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          height: "80vh",
-        }}
-      >
+      <Box sx={{ padding: 3 }}>
         <CircularProgress />
+        <Typography variant="body1" sx={{ mt: 2 }}>
+          Đang tải dữ liệu điểm danh...
+        </Typography>
       </Box>
     );
   }
 
-  if (!classInfo) {
-    return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="error">
-          Không tìm thấy thông tin lớp học. Vui lòng thử lại sau.
-        </Alert>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={() => navigate("/student/classes")}
-          sx={{ mt: 2 }}
-        >
-          Quay lại danh sách lớp
-        </Button>
-      </Box>
-    );
-  }
+  // Hiển thị thông tin điểm danh
+  const statusInfo = getAttendanceStatusInfo();
 
   return (
     <Box sx={{ padding: 3 }}>
-      {/* Header */}
-      <Box sx={{ mb: 3 }}>
-        <Button
-          variant="outlined"
-          startIcon={<ArrowBack />}
-          onClick={() => navigate("/student/classes")}
-          sx={{ mb: 2 }}
-        >
-          Quay lại danh sách lớp
-        </Button>
-        <Typography variant="h4" gutterBottom>
-          {classInfo.class_name}
-        </Typography>
-        <Typography variant="subtitle1" color="text.secondary" gutterBottom>
-          {classInfo.course_id?.name} ({classInfo.course_id?.code})
-        </Typography>
-      </Box>
+      <Button
+        variant="outlined"
+        startIcon={<ArrowBack />}
+        onClick={() => navigate("/student/classes")}
+        sx={{ mb: 3 }}
+      >
+        Quay lại danh sách lớp
+      </Button>
 
-      {/* Thông tin chung */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} md={6}>
+      {/* Thông tin lớp học */}
+      <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={8}>
+            <Typography variant="h5" gutterBottom>
+              {classInfo?.class_name || "Chi tiết điểm danh"}
+            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center" mb={1}>
+              <Book color="primary" />
+              <Typography variant="body1">
+                Môn học: {classInfo?.subject_id?.name || "N/A"} (
+                {classInfo?.subject_id?.code || "N/A"})
+              </Typography>
+            </Stack>
+            <Stack direction="row" spacing={1} alignItems="center" mb={1}>
+              <Person color="primary" />
+              <Typography variant="body1">
+                Giảng viên: {classInfo?.teacher_id?.full_name || "N/A"}
+              </Typography>
+            </Stack>
+          </Grid>
+
+          <Grid item xs={12} md={4}>
+            <Card
+              variant="outlined"
+              sx={{ bgcolor: "primary.light", color: "primary.contrastText" }}
+            >
+              <CardContent>
+                <Typography variant="h6" align="center" gutterBottom>
+                  Điểm chuyên cần
+                </Typography>
+                <Box sx={{ display: "flex", justifyContent: "center", mb: 2 }}>
+                  <Typography
+                    variant="h3"
+                    color={
+                      attendanceScore.passed ? "success.main" : "error.main"
+                    }
+                  >
+                    {attendanceScore.score}/{attendanceScore.maxScore}
+                  </Typography>
+                </Box>
+                <Alert
+                  severity={attendanceScore.passed ? "success" : "error"}
+                  variant="filled"
+                >
+                  {attendanceScore.message}
+                </Alert>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      </Paper>
+
+      {/* Thống kê điểm danh */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography
-                variant="h6"
-                gutterBottom
-                sx={{ display: "flex", alignItems: "center" }}
-              >
-                <Book sx={{ mr: 1 }} /> Thông tin lớp học
+              <Typography color="textSecondary" gutterBottom>
+                Tổng số buổi
               </Typography>
-              <Divider sx={{ my: 1.5 }} />
-              <Stack spacing={1.5}>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
-                  <School sx={{ mr: 1, fontSize: 20, color: "primary.main" }} />
-                  <Typography variant="body2">
-                    <strong>Học kỳ:</strong> {classInfo.semester?.name || "N/A"}
-                  </Typography>
-                </Box>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
-                  <CalendarToday
-                    sx={{ mr: 1, fontSize: 20, color: "primary.main" }}
-                  />
-                  <Typography variant="body2">
-                    <strong>Năm học:</strong> {classInfo.academic_year || "N/A"}
-                  </Typography>
-                </Box>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
-                  <Person sx={{ mr: 1, fontSize: 20, color: "primary.main" }} />
-                  <Typography variant="body2">
-                    <strong>Giảng viên:</strong>{" "}
-                    {classInfo.teacher_id?.full_name || "N/A"}
-                  </Typography>
-                </Box>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
-                  <AccessTime
-                    sx={{ mr: 1, fontSize: 20, color: "primary.main" }}
-                  />
-                  <Typography variant="body2">
-                    <strong>Tổng số buổi học:</strong>{" "}
-                    {classInfo.total_sessions || "N/A"}
-                  </Typography>
-                </Box>
-              </Stack>
+              <Typography variant="h4">{attendanceStats.total}</Typography>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={6}>
+
+        <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography
-                variant="h6"
-                gutterBottom
-                sx={{ display: "flex", alignItems: "center" }}
-              >
-                <HowToReg sx={{ mr: 1 }} /> Thống kê điểm danh
+              <Typography color="textSecondary" gutterBottom>
+                Có mặt
               </Typography>
-              <Divider sx={{ my: 1.5 }} />
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="body2" gutterBottom>
-                  Tỷ lệ tham gia: {Math.round(attendanceStats.attendanceRate)}%
+              <Box display="flex" alignItems="center">
+                <Typography variant="h4" color="success.main">
+                  {attendanceStats.present}
                 </Typography>
+                <Typography
+                  variant="body2"
+                  color="textSecondary"
+                  sx={{ ml: 1 }}
+                >
+                  ({Math.round(attendanceStats.presentPercentage || 0)}%)
+                </Typography>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Vắng mặt
+              </Typography>
+              <Box display="flex" alignItems="center">
+                <Typography variant="h4" color="error.main">
+                  {attendanceStats.absent}
+                </Typography>
+                <Typography
+                  variant="body2"
+                  color="textSecondary"
+                  sx={{ ml: 1 }}
+                >
+                  ({Math.round(attendanceStats.absentPercentage || 0)}%)
+                </Typography>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Tỷ lệ tham gia
+              </Typography>
+              <Box>
+                <Box display="flex" alignItems="center">
+                  <Typography variant="h4" color={statusInfo.color + ".main"}>
+                    {Math.round(attendanceStats.attendanceRate)}%
+                  </Typography>
+                  <Box sx={{ ml: 1 }}>{statusInfo.icon}</Box>
+                </Box>
                 <LinearProgress
                   variant="determinate"
                   value={attendanceStats.attendanceRate}
-                  color={
-                    attendanceStats.attendanceRate >= 80
-                      ? "success"
-                      : attendanceStats.attendanceRate >= 50
-                      ? "warning"
-                      : "error"
-                  }
-                  sx={{ height: 10, borderRadius: 5, mb: 1 }}
+                  color={statusInfo.color}
+                  sx={{ mt: 1, height: 8, borderRadius: 2 }}
                 />
-              </Box>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Paper
-                    sx={{
-                      p: 1.5,
-                      textAlign: "center",
-                      bgcolor: "success.light",
-                      borderRadius: 2,
-                    }}
-                  >
-                    <Typography variant="h5" color="success.dark">
-                      {attendanceStats.present}
-                    </Typography>
-                    <Typography variant="caption">Có mặt</Typography>
-                  </Paper>
-                </Grid>
-                <Grid item xs={6}>
-                  <Paper
-                    sx={{
-                      p: 1.5,
-                      textAlign: "center",
-                      bgcolor: "warning.light",
-                      borderRadius: 2,
-                    }}
-                  >
-                    <Typography variant="h5" color="warning.dark">
-                      {attendanceStats.late}
-                    </Typography>
-                    <Typography variant="caption">Đi muộn</Typography>
-                  </Paper>
-                </Grid>
-                <Grid item xs={6}>
-                  <Paper
-                    sx={{
-                      p: 1.5,
-                      textAlign: "center",
-                      bgcolor: "error.light",
-                      borderRadius: 2,
-                    }}
-                  >
-                    <Typography variant="h5" color="error.dark">
-                      {attendanceStats.absent}
-                    </Typography>
-                    <Typography variant="caption">Vắng mặt</Typography>
-                  </Paper>
-                </Grid>
-                <Grid item xs={6}>
-                  <Paper
-                    sx={{
-                      p: 1.5,
-                      textAlign: "center",
-                      bgcolor: "info.light",
-                      borderRadius: 2,
-                    }}
-                  >
-                    <Typography variant="h5" color="info.dark">
-                      {calculateAttendanceScore()}
-                    </Typography>
-                    <Typography variant="caption">Điểm chuyên cần</Typography>
-                  </Paper>
-                </Grid>
-              </Grid>
-              <Box sx={{ mt: 2, textAlign: "right" }}>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={<CloudDownload />}
-                  onClick={handleExportAttendance}
-                >
-                  Xuất danh sách
-                </Button>
               </Box>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
-      {/* Danh sách các buổi học và trạng thái điểm danh */}
-      <Paper sx={{ p: 2 }}>
-        <Typography
-          variant="h6"
-          gutterBottom
-          sx={{ display: "flex", alignItems: "center" }}
-        >
-          <Description sx={{ mr: 1 }} /> Chi tiết điểm danh
-        </Typography>
-        <Divider sx={{ mb: 2 }} />
-        {attendanceLogs.length > 0 ? (
+      {/* Chi tiết điểm danh */}
+      <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
+        <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
+          <Typography variant="h6">Chi tiết điểm danh</Typography>
+          <Button
+            variant="contained"
+            startIcon={<CloudDownload />}
+            onClick={handleExportAttendance}
+            disabled={attendanceLogs.length === 0}
+          >
+            Xuất CSV
+          </Button>
+        </Box>
+
+        {attendanceLogs.length === 0 ? (
+          <Alert severity="info" sx={{ mt: 2 }}>
+            Chưa có dữ liệu điểm danh cho lớp học này
+          </Alert>
+        ) : (
           <TableContainer>
-            <Table>
+            <Table sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell>STT</TableCell>
                   <TableCell>Buổi học</TableCell>
                   <TableCell>Ngày</TableCell>
-                  <TableCell>Thời gian</TableCell>
                   <TableCell>Trạng thái</TableCell>
+                  <TableCell>Thời gian điểm danh</TableCell>
                   <TableCell>Ghi chú</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {attendanceLogs.map((log, index) => {
-                  const session = log.session_id;
-                  return (
-                    <TableRow key={log._id}>
-                      <TableCell>{index + 1}</TableCell>
-                      <TableCell>
-                        {session.title || `Buổi ${index + 1}`}
-                      </TableCell>
-                      <TableCell>
-                        {new Date(session.date).toLocaleDateString("vi-VN")}
-                      </TableCell>
-                      <TableCell>
-                        {session.start_time} - {session.end_time}
-                      </TableCell>
-                      <TableCell>
-                        <AttendanceStatusChip status={log.status} />
-                      </TableCell>
-                      <TableCell>{log.note || "-"}</TableCell>
-                    </TableRow>
-                  );
-                })}
+                {attendanceLogs.map((log, index) => (
+                  <TableRow key={log._id || index}>
+                    <TableCell>
+                      Buổi {log.session_id?.session_number || index + 1}
+                    </TableCell>
+                    <TableCell>
+                      {log.session_id?.date
+                        ? new Date(log.session_id.date).toLocaleDateString(
+                            "vi-VN"
+                          )
+                        : "N/A"}
+                    </TableCell>
+                    <TableCell>
+                      <AttendanceStatusChip status={log.status} />
+                    </TableCell>
+                    <TableCell>
+                      {log.timestamp
+                        ? new Date(log.timestamp).toLocaleString("vi-VN")
+                        : "N/A"}
+                    </TableCell>
+                    <TableCell>{log.note || "—"}</TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           </TableContainer>
-        ) : (
-          <Alert severity="info">
-            Chưa có dữ liệu điểm danh cho lớp học này.
-          </Alert>
         )}
       </Paper>
     </Box>

@@ -70,6 +70,7 @@ import {
   Person,
   LockPerson,
   SentimentDissatisfied as NoFace,
+  Edit,
 } from "@mui/icons-material";
 import InfoIcon from "@mui/icons-material/Info";
 import RefreshIcon from "@mui/icons-material/Refresh";
@@ -142,6 +143,11 @@ const TeacherMainClassPage = () => {
   // Thêm state cho tổng số sinh viên đã duyệt
   const [totalApproved, setTotalApproved] = useState(0);
 
+  // States cho modal chỉnh sửa lớp chính
+  const [openEditClassDialog, setOpenEditClassDialog] = useState(false);
+  const [editClassData, setEditClassData] = useState(null);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+
   useEffect(() => {
     fetchMainClasses();
     fetchDepartments();
@@ -154,8 +160,9 @@ const TeacherMainClassPage = () => {
       setError(null);
 
       // Lấy danh sách lớp được phân công cố vấn
+      // Thử lại endpoint với query parameter advisor_id, bỏ all=true
       const response = await axios.get(
-        `${API_URL}/classes/main?advisor_id=${user._id}&all=true`,
+        `${API_URL}/classes/main?advisor_id=${user._id}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         }
@@ -407,14 +414,25 @@ const TeacherMainClassPage = () => {
               <Class sx={{ mr: 1 }} />
               Thông tin lớp {mainClass.name}
             </Typography>
-            {mainClasses.length > 1 && (
-              <Chip
-                icon={<SwapHoriz />}
-                label={`${mainClasses.length} lớp phụ trách`}
-                color="info"
+            <Box sx={{ display: "flex", gap: 1 }}>
+              {mainClasses.length > 1 && (
+                <Chip
+                  icon={<SwapHoriz />}
+                  label={`${mainClasses.length} lớp phụ trách`}
+                  color="info"
+                  variant="outlined"
+                />
+              )}
+              <Button
                 variant="outlined"
-              />
-            )}
+                color="primary"
+                size="small"
+                startIcon={<Edit />}
+                onClick={handleOpenEditClassDialog}
+              >
+                Chỉnh sửa
+              </Button>
+            </Box>
           </Box>
           <Grid container spacing={2}>
             <Grid item xs={12} md={6}>
@@ -1004,6 +1022,92 @@ const TeacherMainClassPage = () => {
       </DialogContent>
     </Dialog>
   );
+
+  // Mở dialog chỉnh sửa lớp chính
+  const handleOpenEditClassDialog = () => {
+    if (!mainClass) return;
+
+    setEditClassData({
+      name: mainClass.name || "",
+      code: mainClass.class_code || "",
+      department_id: mainClass.department_id?._id || "",
+    });
+
+    setOpenEditClassDialog(true);
+  };
+
+  // Đóng dialog chỉnh sửa lớp chính
+  const handleCloseEditClassDialog = () => {
+    setOpenEditClassDialog(false);
+    setEditClassData(null);
+  };
+
+  // Xử lý thay đổi trong form chỉnh sửa
+  const handleEditClassChange = (e) => {
+    const { name, value } = e.target;
+    setEditClassData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  // Cập nhật thông tin lớp chính
+  const handleUpdateMainClass = async () => {
+    try {
+      setIsSubmittingEdit(true);
+
+      // Kiểm tra các trường bắt buộc
+      if (
+        !editClassData.name ||
+        !editClassData.code ||
+        !editClassData.department_id
+      ) {
+        enqueueSnackbar("Vui lòng điền đầy đủ thông tin", {
+          variant: "warning",
+        });
+        setIsSubmittingEdit(false);
+        return;
+      }
+
+      const response = await axios.put(
+        `${API_URL}/classes/main/${mainClass._id}`,
+        {
+          name: editClassData.name,
+          code: editClassData.code,
+          department_id: editClassData.department_id,
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      enqueueSnackbar("Cập nhật lớp chính thành công", { variant: "success" });
+      handleCloseEditClassDialog();
+
+      // Cập nhật thông tin lớp chính trong state
+      if (response.data.success && response.data.data) {
+        const updatedClass = response.data.data;
+
+        // Cập nhật lớp chính hiện tại
+        setMainClass(updatedClass);
+
+        // Cập nhật danh sách lớp chính
+        setMainClasses(
+          mainClasses.map((cls) =>
+            cls._id === updatedClass._id ? updatedClass : cls
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Lỗi khi cập nhật lớp chính:", error);
+      enqueueSnackbar(
+        error.response?.data?.message || "Lỗi khi cập nhật lớp chính",
+        { variant: "error" }
+      );
+    } finally {
+      setIsSubmittingEdit(false);
+    }
+  };
 
   if (isLoading) {
     return renderLoadingState();
@@ -1737,6 +1841,87 @@ const TeacherMainClassPage = () => {
             startIcon={isSubmitting ? <CircularProgress size={20} /> : <Add />}
           >
             {isSubmitting ? "Đang tạo..." : "Tạo lớp"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dialog chỉnh sửa lớp chính */}
+      <Dialog
+        open={openEditClassDialog}
+        onClose={handleCloseEditClassDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle
+          sx={{ bgcolor: "primary.main", color: "white", fontWeight: "bold" }}
+        >
+          <Edit sx={{ verticalAlign: "middle", mr: 1 }} />
+          Chỉnh sửa thông tin lớp chính
+        </DialogTitle>
+        <DialogContent dividers>
+          {editClassData && (
+            <Grid container spacing={2} sx={{ mt: 1 }}>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Tên lớp"
+                  name="name"
+                  value={editClassData.name}
+                  onChange={handleEditClassChange}
+                  required
+                  variant="outlined"
+                  placeholder="VD: Công nghệ thông tin 1"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Mã lớp"
+                  name="code"
+                  value={editClassData.code}
+                  onChange={handleEditClassChange}
+                  required
+                  variant="outlined"
+                  placeholder="VD: CNTT2021-1"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <FormControl fullWidth required>
+                  <InputLabel>Khoa</InputLabel>
+                  <Select
+                    label="Khoa"
+                    name="department_id"
+                    value={editClassData.department_id}
+                    onChange={handleEditClassChange}
+                  >
+                    {departments.map((dept) => (
+                      <MenuItem key={dept._id} value={dept._id}>
+                        {dept.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            </Grid>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={handleCloseEditClassDialog}
+            disabled={isSubmittingEdit}
+          >
+            Hủy
+          </Button>
+          <Button
+            onClick={handleUpdateMainClass}
+            variant="contained"
+            color="primary"
+            disabled={isSubmittingEdit}
+            startIcon={
+              isSubmittingEdit ? <CircularProgress size={20} /> : <Edit />
+            }
+          >
+            {isSubmittingEdit ? "Đang cập nhật..." : "Cập nhật lớp"}
           </Button>
         </DialogActions>
       </Dialog>

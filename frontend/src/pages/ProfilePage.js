@@ -28,7 +28,6 @@ const ProfilePage = () => {
     email: "",
     phone: "",
     student_id: "",
-    student_code: "",
     teacher_code: "",
     department: "",
   });
@@ -45,7 +44,6 @@ const ProfilePage = () => {
         email: user.email || "",
         phone: user.contact?.phone || "",
         student_id: user.school_info?.student_id || "",
-        student_code: user.school_info?.student_code || "",
         teacher_code: user.school_info?.teacher_code || "",
         department: user.school_info?.department || "",
       });
@@ -72,7 +70,6 @@ const ProfilePage = () => {
         },
         school_info: {
           student_id: formData.student_id,
-          student_code: formData.student_code,
           teacher_code: formData.teacher_code,
           department: formData.department,
         },
@@ -216,17 +213,6 @@ const ProfilePage = () => {
                     variant={isEditing ? "outlined" : "filled"}
                   />
                 </Grid>
-                <Grid item xs={12} md={6}>
-                  <TextField
-                    fullWidth
-                    label="Mã sinh viên cũ"
-                    name="student_code"
-                    value={formData.student_code}
-                    onChange={handleChange}
-                    disabled={!isEditing}
-                    variant={isEditing ? "outlined" : "filled"}
-                  />
-                </Grid>
               </>
             )}
             {user?.role === "teacher" && (
@@ -274,7 +260,6 @@ const ProfilePage = () => {
                         email: user.email || "",
                         phone: user.contact?.phone || "",
                         student_id: user.school_info?.student_id || "",
-                        student_code: user.school_info?.student_code || "",
                         teacher_code: user.school_info?.teacher_code || "",
                         department: user.school_info?.department || "",
                       });

@@ -42,6 +42,7 @@ import { setCredentials } from "../redux/slices/authSlice";
 import FaceRegistrationComponent from "../components/FaceRegistrationComponent";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+const REQUIRED_IMAGES = 3; // Define required images consistently
 
 const CompleteRegistrationPage = () => {
   const dispatch = useDispatch();
@@ -60,7 +61,8 @@ const CompleteRegistrationPage = () => {
   const [faceRegistrationExpanded, setFaceRegistrationExpanded] =
     useState(false);
   const [faceData, setFaceData] = useState(null);
-  const [includeFaceData, setIncludeFaceData] = useState(false);
+  const [isFaceRegistrationComplete, setIsFaceRegistrationComplete] =
+    useState(false);
 
   // Lấy thông tin từ URL params
   const queryParams = new URLSearchParams(location.search);
@@ -254,8 +256,21 @@ const CompleteRegistrationPage = () => {
   };
 
   const handleFaceDataCapture = (capturedFaceData) => {
-    setFaceData(capturedFaceData);
-    setIncludeFaceData(true);
+    console.log(
+      "[CompleteRegistrationPage] Received face data:",
+      capturedFaceData
+    );
+    if (capturedFaceData && capturedFaceData.length >= REQUIRED_IMAGES) {
+      setFaceData(capturedFaceData);
+      setIsFaceRegistrationComplete(true);
+      // Optionally close the accordion
+      // setFaceRegistrationExpanded(false);
+      enqueueSnackbar("Đã chụp đủ ảnh khuôn mặt!", { variant: "success" });
+    } else {
+      // Handle reset case if component sends null/empty
+      setFaceData(null);
+      setIsFaceRegistrationComplete(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -308,9 +323,6 @@ const CompleteRegistrationPage = () => {
         if (formData.studentId) {
           registrationData.school_info.student_id = formData.studentId;
         }
-        if (formData.studentCode) {
-          registrationData.school_info.student_code = formData.studentCode;
-        }
       } else if (formData.role === "teacher" && formData.teacherCode) {
         registrationData.school_info.teacher_code = formData.teacherCode;
       }
@@ -322,14 +334,20 @@ const CompleteRegistrationPage = () => {
         };
       }
 
-      // Thêm dữ liệu khuôn mặt nếu có
-      if (includeFaceData && faceData) {
+      // Add face data ONLY IF registration was completed
+      if (isFaceRegistrationComplete && faceData) {
+        console.log("Including face data in registration payload.");
         registrationData.faceFeatures = {
           descriptors: faceData.map((data) => data.descriptor),
-          lastUpdated: new Date(),
+          lastUpdated: new Date(), // Add timestamp
         };
+      } else {
+        console.log(
+          "Face registration not complete or no data, skipping faceFeatures."
+        );
       }
 
+      console.log("Submitting complete registration:", registrationData);
       const response = await axios.post(
         `${API_URL}/auth/google-complete`,
         registrationData
@@ -559,17 +577,6 @@ const CompleteRegistrationPage = () => {
               <Grid item xs={12} md={6}>
                 <TextField
                   fullWidth
-                  id="studentCode"
-                  label="Mã sinh viên (Mã cũ)"
-                  name="studentCode"
-                  value={formData.studentCode}
-                  onChange={handleChange}
-                />
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
                   id="major"
                   label="Ngành học"
                   name="major"
@@ -687,59 +694,46 @@ const CompleteRegistrationPage = () => {
           )}
         </Grid>
 
-        {formData.role === "student" && (
-          <Accordion
-            expanded={faceRegistrationExpanded}
-            onChange={() =>
-              setFaceRegistrationExpanded(!faceRegistrationExpanded)
-            }
-            sx={{ mt: 3 }}
-          >
-            <AccordionSummary expandIcon={<ExpandMore />}>
-              <Box sx={{ display: "flex", alignItems: "center" }}>
-                <Face sx={{ mr: 1 }} />
-                <Typography>Đăng ký khuôn mặt (tùy chọn)</Typography>
-                {faceData && includeFaceData && (
-                  <Chip
-                    label="Đã đăng ký"
-                    color="success"
-                    size="small"
-                    sx={{ ml: 2 }}
-                    icon={<Check fontSize="small" />}
-                  />
-                )}
-              </Box>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Alert severity="info" sx={{ mb: 2 }}>
-                Đăng ký khuôn mặt sẽ giúp giảng viên xác nhận danh tính và sử
-                dụng cho điểm danh tự động
-              </Alert>
-              <FaceRegistrationComponent
-                onFaceDataCapture={handleFaceDataCapture}
-              />
-              <Box sx={{ mt: 2, display: "flex", alignItems: "center" }}>
-                <FormControl sx={{ flexGrow: 1 }}>
-                  <Button
-                    variant="outlined"
-                    color={includeFaceData ? "success" : "primary"}
-                    onClick={() => setIncludeFaceData(!includeFaceData)}
-                    disabled={!faceData}
-                    startIcon={includeFaceData ? <Check /> : null}
-                  >
-                    {includeFaceData
-                      ? "Đã xác nhận sử dụng dữ liệu khuôn mặt"
-                      : "Không sử dụng dữ liệu khuôn mặt"}
-                  </Button>
-                </FormControl>
-              </Box>
-            </AccordionDetails>
-          </Accordion>
-        )}
+        {/* Accordion for Face Registration */}
+        <Accordion
+          expanded={faceRegistrationExpanded}
+          onChange={() =>
+            setFaceRegistrationExpanded(!faceRegistrationExpanded)
+          }
+          sx={{ mt: 3 }}
+        >
+          <AccordionSummary expandIcon={<ExpandMore />}>
+            <Box sx={{ display: "flex", alignItems: "center" }}>
+              <Face sx={{ mr: 1 }} />
+              <Typography>Đăng ký khuôn mặt (tùy chọn)</Typography>
+              {/* Updated Chip based on completion state */}
+              {isFaceRegistrationComplete && (
+                <Chip
+                  label="Đã hoàn tất chụp ảnh"
+                  color="success"
+                  size="small"
+                  sx={{ ml: 2 }}
+                  icon={<Check fontSize="small" />}
+                />
+              )}
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Đăng ký khuôn mặt sẽ giúp giảng viên xác nhận danh tính và sử dụng
+              cho điểm danh tự động.
+            </Alert>
+            {/* Use the updated component with correct props */}
+            <FaceRegistrationComponent
+              onFaceDataCapture={handleFaceDataCapture}
+              requiredImages={REQUIRED_IMAGES} // Pass the required number
+            />
+          </AccordionDetails>
+        </Accordion>
 
         <Box sx={{ mt: 3, display: "flex", justifyContent: "space-between" }}>
           <Button variant="outlined" onClick={() => setShowRoleSelection(true)}>
-            Quay lại
+            Quay lại chọn vai trò
           </Button>
 
           <Button type="submit" variant="contained" disabled={isLoading}>

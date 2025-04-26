@@ -3,23 +3,23 @@ const router = express.Router();
 const classController = require("../controllers/class.controller");
 const { protect, authorize } = require("../middlewares/auth.middleware");
 
-// =================== MAIN CLASS ROUTES ===================
-// Lấy danh sách tất cả lớp chính
+// =================== MAIN CLASS ROUTES (Moved Up) ===================
+// Lấy danh sách tất cả lớp chính (moved before /:id)
 router.get("/main", protect, classController.getAllMainClasses);
 
 // API công khai để lấy danh sách lớp chính
 router.get("/main/public", classController.getAllMainClasses);
 
-// Lấy lớp chính theo ID
-router.get("/main/:id", protect, classController.getMainClassById);
-
 // Lấy thống kê lớp chính
 router.get(
-  "/main/statistics",
+  "/main-statistics",
   protect,
   authorize(["admin"]),
   classController.getMainClassStatistics
 );
+
+// Lấy lớp chính theo ID
+router.get("/main/:id", protect, classController.getMainClassById);
 
 // Tạo lớp chính mới
 router.post(
@@ -33,7 +33,7 @@ router.post(
 router.put(
   "/main/:id",
   protect,
-  authorize(["admin"]),
+  authorize(["admin", "teacher"]),
   classController.updateMainClass
 );
 
@@ -45,10 +45,14 @@ router.delete(
   classController.deleteMainClass
 );
 
+// =================== CLASS COMMON ROUTES ===================
+// Route để lấy lớp học thông qua ID (chuyển hướng tới getTeachingClassById)
+// Đảm bảo route này nằm SAU các route /main cụ thể hơn
+
 // =================== TEACHING CLASS ROUTES ===================
-// Lấy thống kê lớp giảng dạy
+// Lấy thống kê lớp giảng dạy (tách riêng route)
 router.get(
-  "/teaching/statistics",
+  "/teaching-statistics",
   protect,
   authorize(["admin"]),
   classController.getTeachingClassStatistics

@@ -26,6 +26,11 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Stack,
+  Avatar,
+  Container,
+  Skeleton,
+  AlertTitle,
 } from "@mui/material";
 import {
   Camera,
@@ -34,167 +39,197 @@ import {
   Info,
   ViewArray,
   SaveAlt,
-  Error,
-  CheckCircle,
+  ErrorOutline,
+  CheckCircleOutline,
   ArrowBack,
-  Help,
+  HelpOutline,
   CameraAlt,
   Person,
+  Replay,
+  FaceRetouchingNatural,
 } from "@mui/icons-material";
 import { getCurrentUser } from "../redux/slices/authSlice";
 import { loadModels, detectFace } from "../utils/faceUtils";
+import FaceRegistrationComponent from "../components/FaceRegistrationComponent";
 
-// Lazy load Webcam để giảm kích thước ban đầu
+// Lazy load Webcam to reduce initial bundle size
 const Webcam = lazy(() => import("react-webcam"));
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+const REQUIRED_IMAGES = 3;
+
+// Improved video constraints for better mobile compatibility
+const videoConstraints = {
+  width: { ideal: 640 },
+  height: { ideal: 480 },
+  facingMode: "user",
+};
 
 const FaceRegistrationPage = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { enqueueSnackbar } = useSnackbar();
-  const { user, token } = useSelector((state) => state.auth);
+  const {
+    user,
+    token,
+    isLoading: authLoading,
+  } = useSelector((state) => state.auth);
 
   // Refs
   const webcamRef = useRef(null);
-  const canvasRef = useRef(null);
+  const canvasRef = useRef(null); // Keep if needed for drawing overlays
 
-  // State
-  const [isLoading, setIsLoading] = useState(false);
+  // --- State ---
+  const [capturedFaceData, setCapturedFaceData] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [registrationError, setRegistrationError] = useState("");
+  const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
-  const [modelsLoaded, setModelsLoaded] = useState(false);
-  const [isCameraReady, setIsCameraReady] = useState(false);
-  const [capturedImages, setCapturedImages] = useState([]);
-  const [detectedFace, setDetectedFace] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const [error, setError] = useState("");
   const [showHelpDialog, setShowHelpDialog] = useState(false);
+  const [allowRegistration, setAllowRegistration] = useState(false);
+  const [checkingFaceStatus, setCheckingFaceStatus] = useState(true);
+  const [hasFaceRegistered, setHasFaceRegistered] = useState(false);
 
-  // Kiểm tra xem user đã đăng ký khuôn mặt chưa
+  // --- Effects ---
+
+  // 1. Check initial face registration status
   useEffect(() => {
-    if (user?.face_registered) {
-      enqueueSnackbar("Bạn đã đăng ký khuôn mặt trước đó", {
-        variant: "info",
-      });
-    }
-  }, [user, enqueueSnackbar]);
+    if (!authLoading && user) {
+      const registered =
+        !!user.faceFeatures &&
+        !!user.faceFeatures.descriptors &&
+        user.faceFeatures.descriptors.length > 0 &&
+        user.faceFeatures.descriptors[0].length > 0;
 
-  // Load các model nhận diện khuôn mặt khi cần thiết (chỉ khi đến bước chụp ảnh)
+      setHasFaceRegistered(registered);
+      if (!registered) {
+        setAllowRegistration(true);
+      }
+      setCheckingFaceStatus(false);
+    }
+  }, [user, authLoading]);
+
+  // 2. Load face models when registration is allowed and needed (Step 1)
   useEffect(() => {
     const initModels = async () => {
-      if (activeStep === 1 && !modelsLoaded) {
+      // Only load if registration is allowed, we are on the capture step (index 1), and models aren't loaded yet
+      if (
+        allowRegistration &&
+        activeStep === 1 &&
+        !capturedFaceData &&
+        !registrationError
+      ) {
+        setIsSubmitting(true);
+        setRegistrationError(null);
         try {
-          setIsLoading(true);
           await loadModels();
-          setModelsLoaded(true);
-          enqueueSnackbar("Đã tải mô hình nhận diện khuôn mặt", {
-            variant: "success",
-          });
         } catch (error) {
-          console.error("Lỗi khi tải mô hình:", error);
-          setError(
-            "Không thể tải mô hình nhận diện khuôn mặt. Vui lòng tải lại trang."
+          setRegistrationError(
+            "Không thể tải mô hình nhận diện. Vui lòng tải lại trang hoặc thử lại."
           );
-          enqueueSnackbar("Lỗi khi tải mô hình nhận diện", {
-            variant: "error",
-          });
+          enqueueSnackbar("Lỗi tải mô hình nhận diện", { variant: "error" });
         } finally {
-          setIsLoading(false);
+          setIsSubmitting(false);
         }
       }
     };
-
     initModels();
-  }, [activeStep, modelsLoaded, enqueueSnackbar]);
+  }, [
+    allowRegistration,
+    activeStep,
+    capturedFaceData,
+    registrationError,
+    enqueueSnackbar,
+  ]);
 
-  // Kiểm tra camera đã sẵn sàng chưa
-  useEffect(() => {
-    if (webcamRef.current?.video?.readyState === 4) {
-      setIsCameraReady(true);
+  // 3. Monitor camera readiness (using callback now)
+  const handleUserMedia = () => {
+    console.log("Camera is ready.");
+  };
+
+  const handleUserMediaError = (error) => {
+    console.error("Camera error:", error);
+    enqueueSnackbar(
+      "Không thể truy cập camera. Vui lòng cấp quyền và thử lại.",
+      { variant: "error" }
+    );
+    // Maybe move to a specific error step or show alert directly
+    if (activeStep === 1) {
+      // If error happens during capture step
+      setRegistrationError("Lỗi camera. Kiểm tra quyền truy cập.");
     }
-  }, [webcamRef.current?.video?.readyState]);
+  };
 
-  // Xử lý chuyển bước
+  // --- Actions ---
+
+  const handleAllowReRegistration = () => {
+    setAllowRegistration(true);
+    setHasFaceRegistered(false);
+    handleReset();
+  };
+
   const handleNext = () => {
-    setActiveStep((prevActiveStep) => prevActiveStep + 1);
+    setActiveStep((prev) => prev + 1);
   };
 
   const handleBack = () => {
-    setActiveStep((prevActiveStep) => prevActiveStep - 1);
+    setRegistrationError("");
+    setActiveStep((prev) => prev - 1);
   };
 
-  // Chụp và phát hiện khuôn mặt
-  const captureImage = async () => {
-    if (!webcamRef.current || !isCameraReady) {
-      enqueueSnackbar("Camera chưa sẵn sàng, vui lòng thử lại", {
-        variant: "warning",
-      });
+  const handleReset = () => {
+    setCapturedFaceData(null);
+    setActiveStep(0);
+    setRegistrationError("");
+    setRegistrationSuccess(false);
+    setIsSubmitting(false);
+  };
+
+  const handleFaceDataCaptured = (faceData) => {
+    if (faceData && faceData.length >= REQUIRED_IMAGES) {
+      setCapturedFaceData(faceData);
+      if (activeStep === 1) {
+        handleNext();
+      }
+    } else {
+      setCapturedFaceData(null);
+    }
+  };
+
+  const submitRegistration = async () => {
+    console.log('"Đăng ký khuôn mặt" button clicked. Starting submission...');
+    if (
+      !capturedFaceData ||
+      capturedFaceData.length < REQUIRED_IMAGES ||
+      isSubmitting ||
+      !user
+    ) {
+      if (!user) {
+        enqueueSnackbar(
+          "Không tìm thấy thông tin người dùng. Vui lòng thử tải lại trang.",
+          { variant: "error" }
+        );
+      } else {
+        enqueueSnackbar(`Cần đủ ${REQUIRED_IMAGES} ảnh để đăng ký.`, {
+          variant: "warning",
+        });
+      }
       return;
     }
 
+    setIsSubmitting(true);
+    setRegistrationError("");
+    setRegistrationSuccess(false);
+
     try {
-      setIsProcessing(true);
-      // Chụp ảnh
-      const imageSrc = webcamRef.current.getScreenshot();
-      if (!imageSrc) {
-        enqueueSnackbar("Không thể chụp ảnh, vui lòng thử lại", {
-          variant: "error",
-        });
-        setIsProcessing(false);
-        return;
-      }
-
-      // Phát hiện khuôn mặt
-      const detections = await detectFace(imageSrc);
-
-      if (!detections) {
-        enqueueSnackbar(
-          "Không phát hiện được khuôn mặt, vui lòng thử lại và đảm bảo khuôn mặt của bạn nằm trong khung hình",
-          { variant: "warning" }
-        );
-        setIsProcessing(false);
-        return;
-      }
-
-      // Lưu ảnh và thông tin khuôn mặt
-      setDetectedFace(detections);
-      setCapturedImages((prev) => [
-        ...prev,
-        { img: imageSrc, descriptor: Array.from(detections.descriptor) },
-      ]);
-
-      enqueueSnackbar(`Đã chụp ảnh ${capturedImages.length + 1}/5`, {
-        variant: "success",
-      });
-
-      // Nếu đã đủ 5 ảnh thì chuyển bước tiếp theo
-      if (capturedImages.length + 1 >= 5) {
-        handleNext();
-      }
-    } catch (error) {
-      console.error("Lỗi khi chụp ảnh:", error);
-      enqueueSnackbar("Đã xảy ra lỗi khi chụp ảnh", { variant: "error" });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // Đăng ký khuôn mặt lên server
-  const registerFace = async () => {
-    try {
-      setIsProcessing(true);
-
-      // Chuẩn bị dữ liệu để gửi lên server
-      const faceData = {
-        descriptors: capturedImages.map((img) => img.descriptor),
-        images: capturedImages.map((img) => img.img),
+      const payload = {
+        userId: user._id,
+        faceDescriptors: capturedFaceData.map((data) => data.descriptor),
       };
 
-      // Gửi request đăng ký khuôn mặt
       const response = await axios.post(
-        `${API_URL}/face-recognition/register`,
-        faceData,
+        `${API_URL}/face-recognition/save-features`,
+        payload,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -204,601 +239,388 @@ const FaceRegistrationPage = () => {
       );
 
       if (response.data.success) {
-        enqueueSnackbar("Đăng ký khuôn mặt thành công", {
-          variant: "success",
-        });
-        setSuccess(true);
-        handleNext();
-
-        // Cập nhật thông tin user
+        enqueueSnackbar(
+          response.data.message || "Lưu đặc trưng khuôn mặt thành công!",
+          { variant: "success" }
+        );
+        setRegistrationSuccess(true);
         dispatch(getCurrentUser());
+        handleNext();
       } else {
-        setError("Không thể đăng ký khuôn mặt. Vui lòng thử lại.");
-        enqueueSnackbar("Đăng ký khuôn mặt thất bại", { variant: "error" });
+        throw new Error(
+          response.data.message || "Lưu đặc trưng khuôn mặt thất bại."
+        );
       }
     } catch (error) {
-      console.error("Lỗi khi đăng ký khuôn mặt:", error);
-      setError(
+      console.error("Lỗi khi lưu đặc trưng khuôn mặt:", error);
+      const errMsg =
         error.response?.data?.message ||
-          "Không thể đăng ký khuôn mặt. Vui lòng thử lại."
-      );
-      enqueueSnackbar("Đăng ký khuôn mặt thất bại", { variant: "error" });
+        error.message ||
+        "Lỗi không xác định khi lưu đặc trưng.";
+
+      setRegistrationError(`Lưu thất bại: ${errMsg}`);
+      enqueueSnackbar(`Lưu thất bại: ${errMsg}`, { variant: "error" });
+      setRegistrationSuccess(false);
     } finally {
-      setIsProcessing(false);
+      setIsSubmitting(false);
     }
   };
 
-  // Reset lại quá trình
-  const handleReset = () => {
-    setCapturedImages([]);
-    setDetectedFace(null);
-    setActiveStep(0);
-    setError("");
-    setSuccess(false);
+  const navigateToProfile = () => {
+    navigate("/profile");
   };
 
-  // Quay lại trang danh sách lớp
-  const navigateToClasses = () => {
-    navigate("/student/classes");
-  };
-
-  // Các bước đăng ký khuôn mặt
   const steps = [
+    // Step 0: Introduction
     {
-      label: "Chuẩn bị",
-      description: "Chuẩn bị camera và kiểm tra kết nối",
+      label: "Giới thiệu",
       content: (
         <Box>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Vui lòng đảm bảo bạn đang ở trong môi trường có ánh sáng tốt và
-            camera hoạt động bình thường.
+          <Typography variant="h6" gutterBottom>
+            Chào mừng đến với đăng ký khuôn mặt
+          </Typography>
+          <Typography paragraph>
+            Quá trình này giúp hệ thống nhận diện bạn để điểm danh. Vui lòng làm
+            theo các bước sau và đảm bảo bạn đang ở nơi có đủ ánh sáng, khuôn
+            mặt không bị che khuất.
+          </Typography>
+          <Alert
+            severity="info"
+            icon={<Info fontSize="inherit" />}
+            sx={{ mt: 2 }}
+          >
+            Bạn sẽ cần chụp <strong>{REQUIRED_IMAGES} ảnh</strong> khuôn mặt.
+            Giữ khuôn mặt thẳng, nhìn trực diện vào camera.
           </Alert>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    Hướng dẫn
-                  </Typography>
-                  <Divider sx={{ my: 1 }} />
-                  <List dense>
-                    <ListItem>
-                      <ListItemIcon>
-                        <Info fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText primary="Đứng ở nơi có ánh sáng tốt, nhìn thẳng vào camera" />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemIcon>
-                        <Info fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText primary="Không đeo kính, mũ hoặc khẩu trang khi đăng ký" />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemIcon>
-                        <Info fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText primary="Giữ khuôn mặt chiếm khoảng 70% khung hình" />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemIcon>
-                        <Info fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText primary="Bạn sẽ cần chụp 5 ảnh ở các góc độ khác nhau" />
-                    </ListItem>
-                  </List>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    Trạng thái
-                  </Typography>
-                  <Divider sx={{ my: 1 }} />
-                  <List>
-                    <ListItem>
-                      <ListItemIcon>
-                        {activeStep >= 1 ? (
-                          modelsLoaded ? (
-                            <Check color="success" />
-                          ) : (
-                            <CircularProgress size={20} />
-                          )
-                        ) : (
-                          <Info color="disabled" />
-                        )}
-                      </ListItemIcon>
-                      <ListItemText
-                        primary="Tải mô hình nhận diện"
-                        secondary={
-                          activeStep >= 1
-                            ? modelsLoaded
-                              ? "Đã tải xong"
-                              : "Đang tải, vui lòng đợi..."
-                            : "Sẽ tải khi bắt đầu chụp ảnh"
-                        }
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemIcon>
-                        {isCameraReady ? (
-                          <Check color="success" />
-                        ) : (
-                          <CircularProgress size={20} />
-                        )}
-                      </ListItemIcon>
-                      <ListItemText
-                        primary="Kiểm tra camera"
-                        secondary={
-                          isCameraReady
-                            ? "Camera đã sẵn sàng"
-                            : "Đang kết nối với camera..."
-                        }
-                      />
-                    </ListItem>
-                  </List>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-          <Box sx={{ mt: 2, textAlign: "right" }}>
-            <Button
-              variant="outlined"
-              onClick={() => setShowHelpDialog(true)}
-              sx={{ mr: 1 }}
-            >
-              Xem hướng dẫn chi tiết
-            </Button>
-            <Button
-              variant="contained"
-              onClick={handleNext}
-              disabled={!isCameraReady}
-            >
-              Tiếp tục
-            </Button>
-          </Box>
-        </Box>
-      ),
-    },
-    {
-      label: "Chụp ảnh khuôn mặt",
-      description: "Chụp 5 ảnh khuôn mặt để đăng ký",
-      content: (
-        <Box>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Vui lòng chụp 5 ảnh khuôn mặt ở các góc độ khác nhau (nhìn thẳng,
-            nghiêng trái, nghiêng phải, hơi ngước lên, hơi cúi xuống).
-          </Alert>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={8}>
-              <Box sx={{ position: "relative", width: "100%" }}>
-                <Suspense
-                  fallback={
-                    <Box
-                      sx={{
-                        display: "flex",
-                        justifyContent: "center",
-                        alignItems: "center",
-                        height: 300,
-                      }}
-                    >
-                      <CircularProgress />
-                      <Typography sx={{ ml: 2 }}>Đang tải camera...</Typography>
-                    </Box>
-                  }
-                >
-                  <Webcam
-                    audio={false}
-                    ref={webcamRef}
-                    screenshotFormat="image/jpeg"
-                    videoConstraints={{
-                      width: 640,
-                      height: 480,
-                      facingMode: "user",
-                    }}
-                    style={{
-                      width: "100%",
-                      borderRadius: "8px",
-                      border: "1px solid #ddd",
-                    }}
-                  />
-                </Suspense>
-                <canvas
-                  ref={canvasRef}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    zIndex: 1,
-                  }}
-                />
-              </Box>
-              <Box sx={{ mt: 2, textAlign: "center" }}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  startIcon={<CameraAlt />}
-                  onClick={captureImage}
-                  disabled={
-                    !isCameraReady ||
-                    isProcessing ||
-                    capturedImages.length >= 5 ||
-                    !modelsLoaded
-                  }
-                >
-                  {isProcessing ? (
-                    <>
-                      <CircularProgress size={24} sx={{ mr: 1 }} />
-                      Đang xử lý...
-                    </>
-                  ) : !modelsLoaded ? (
-                    "Đang tải mô hình..."
-                  ) : (
-                    "Chụp ảnh"
-                  )}
-                </Button>
-              </Box>
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    Ảnh đã chụp ({capturedImages.length}/5)
-                  </Typography>
-                  <Divider sx={{ my: 1 }} />
-                  <Box
-                    sx={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 1,
-                      maxHeight: 320,
-                      overflow: "auto",
-                    }}
-                  >
-                    {capturedImages.length > 0 ? (
-                      capturedImages.map((img, index) => (
-                        <Box
-                          key={index}
-                          sx={{
-                            border: "1px solid #ddd",
-                            borderRadius: "4px",
-                            overflow: "hidden",
-                          }}
-                        >
-                          <img
-                            src={img.img}
-                            alt={`Ảnh ${index + 1}`}
-                            style={{ width: "100%" }}
-                          />
-                        </Box>
-                      ))
-                    ) : (
-                      <Typography
-                        variant="body2"
-                        sx={{ textAlign: "center", py: 2 }}
-                      >
-                        Chưa có ảnh nào
-                      </Typography>
-                    )}
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-          <Box sx={{ mt: 2, display: "flex", justifyContent: "space-between" }}>
-            <Button onClick={handleBack}>Quay lại</Button>
-            <Button
-              variant="contained"
-              onClick={handleNext}
-              disabled={capturedImages.length < 5}
-            >
-              Tiếp tục
-            </Button>
-          </Box>
-        </Box>
-      ),
-    },
-    {
-      label: "Xác nhận và hoàn tất",
-      description: "Xác nhận thông tin và hoàn tất đăng ký",
-      content: (
-        <Box>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Vui lòng xem lại thông tin và ảnh đã chụp trước khi hoàn tất đăng
-            ký.
-          </Alert>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    Thông tin đăng ký
-                  </Typography>
-                  <Divider sx={{ my: 1 }} />
-                  <List>
-                    <ListItem>
-                      <ListItemIcon>
-                        <Person />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary="Họ và tên"
-                        secondary={user?.full_name || "N/A"}
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemIcon>
-                        <Face />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary="Số ảnh đã chụp"
-                        secondary={`${capturedImages.length} ảnh`}
-                      />
-                    </ListItem>
-                  </List>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    Xem trước ảnh
-                  </Typography>
-                  <Divider sx={{ my: 1 }} />
-                  <Box
-                    sx={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fill, minmax(120px, 1fr))",
-                      gap: 1,
-                    }}
-                  >
-                    {capturedImages.map((img, index) => (
-                      <Box
-                        key={index}
-                        sx={{
-                          border: "1px solid #ddd",
-                          borderRadius: "4px",
-                          overflow: "hidden",
-                        }}
-                      >
-                        <img
-                          src={img.img}
-                          alt={`Ảnh ${index + 1}`}
-                          style={{ width: "100%" }}
-                        />
-                      </Box>
-                    ))}
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-          {error && (
+          {registrationError && (
             <Alert severity="error" sx={{ mt: 2 }}>
-              {error}
+              {registrationError}
             </Alert>
           )}
-          <Box sx={{ mt: 2, display: "flex", justifyContent: "space-between" }}>
-            <Button onClick={handleBack}>Quay lại</Button>
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={registerFace}
-              disabled={isProcessing || capturedImages.length < 5}
-              startIcon={
-                isProcessing ? <CircularProgress size={20} /> : <SaveAlt />
-              }
-            >
-              {isProcessing ? "Đang xử lý..." : "Hoàn tất đăng ký"}
-            </Button>
-          </Box>
         </Box>
       ),
     },
+    // Step 1: Capture using Component
+    {
+      label: "Chụp ảnh",
+      content: (
+        <Box>
+          <Typography variant="h6" gutterBottom>
+            Chụp {REQUIRED_IMAGES} ảnh
+          </Typography>
+          <Typography variant="body2" color="textSecondary" paragraph>
+            Giữ yên và nhìn thẳng vào camera. Nhấn nút "Chụp ảnh" khi sẵn sàng.
+            Sử dụng nút "Hiện Landmark" để xem các điểm nhận diện (nếu cần).
+          </Typography>
+          <FaceRegistrationComponent
+            onFaceDataCapture={handleFaceDataCaptured}
+            requiredImages={REQUIRED_IMAGES}
+          />
+        </Box>
+      ),
+    },
+    // Step 2: Confirmation
+    {
+      label: "Xác nhận",
+      content: (
+        <Box sx={{ textAlign: "center" }}>
+          <Typography variant="h6" gutterBottom>
+            Xem lại và Xác nhận
+          </Typography>
+          <Typography paragraph>
+            Bạn đã chụp đủ {REQUIRED_IMAGES} ảnh. Xem lại các ảnh dưới đây. Nếu
+            hài lòng, nhấn "Đăng ký".
+          </Typography>
+          {capturedFaceData && capturedFaceData.length > 0 && (
+            <Stack
+              direction="row"
+              spacing={1}
+              justifyContent="center"
+              flexWrap="wrap"
+              mb={3}
+            >
+              {capturedFaceData.map((imgData, index) => (
+                <Avatar
+                  key={index}
+                  src={imgData.img}
+                  sx={{ width: 80, height: 80 }}
+                />
+              ))}
+            </Stack>
+          )}
+
+          {registrationError && (
+            <Alert severity="error" sx={{ mb: 2, textAlign: "left" }}>
+              {registrationError}
+            </Alert>
+          )}
+
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<SaveAlt />}
+            onClick={submitRegistration}
+            disabled={
+              isSubmitting ||
+              !capturedFaceData ||
+              capturedFaceData.length < REQUIRED_IMAGES
+            }
+            sx={{ mt: 1, mb: 1 }}
+          >
+            {isSubmitting ? (
+              <CircularProgress size={24} color="inherit" />
+            ) : (
+              "Đăng ký khuôn mặt"
+            )}
+          </Button>
+        </Box>
+      ),
+    },
+    // Step 3: Completion - Modified Content Rendering
     {
       label: "Hoàn thành",
-      description: "Đăng ký khuôn mặt thành công",
       content: (
-        <Box sx={{ textAlign: "center", py: 3 }}>
-          {success ? (
-            <>
-              <CheckCircle color="success" sx={{ fontSize: 64, mb: 2 }} />
-              <Typography variant="h5" gutterBottom>
-                Đăng ký khuôn mặt thành công!
+        <Box sx={{ textAlign: "center", p: 2 }}>
+          {/* Show content only after submission attempt is resolved */}
+          {isSubmitting ? (
+            <Box
+              sx={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 1,
+              }}
+            >
+              <CircularProgress />
+              <Typography variant="body2" color="text.secondary">
+                Đang xử lý...
               </Typography>
-              <Typography variant="body1" paragraph>
-                Từ giờ bạn có thể sử dụng tính năng điểm danh bằng khuôn mặt.
+            </Box>
+          ) : registrationSuccess ? (
+            // Success UI
+            <>
+              <CheckCircleOutline
+                color="success"
+                sx={{ fontSize: 60, mb: 2 }}
+              />
+              <Typography variant="h5" gutterBottom>
+                Đăng ký thành công!
+              </Typography>
+              <Typography paragraph>
+                Dữ liệu khuôn mặt của bạn đã được lưu.
+              </Typography>
+              <Button variant="contained" onClick={navigateToProfile}>
+                Về trang cá nhân
+              </Button>
+            </>
+          ) : registrationError ? (
+            // Failure UI (only shows if registrationError has content)
+            <>
+              <ErrorOutline color="error" sx={{ fontSize: 60, mb: 2 }} />
+              <Typography variant="h5" gutterBottom>
+                Đăng ký thất bại
+              </Typography>
+              <Typography paragraph color="error">
+                {registrationError /* Display the specific error */}
               </Typography>
               <Button
-                variant="contained"
-                color="primary"
-                onClick={navigateToClasses}
-                sx={{ mt: 2 }}
+                variant="outlined"
+                onClick={handleReset}
+                startIcon={<Replay />}
               >
-                Quay lại danh sách lớp
+                Thử lại từ đầu
               </Button>
             </>
           ) : (
-            <>
-              <Error color="error" sx={{ fontSize: 64, mb: 2 }} />
-              <Typography variant="h5" gutterBottom>
-                Đã xảy ra lỗi!
-              </Typography>
-              <Typography variant="body1" paragraph>
-                {error || "Không thể đăng ký khuôn mặt. Vui lòng thử lại."}
-              </Typography>
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={handleReset}
-                sx={{ mt: 2 }}
-              >
-                Thử lại
-              </Button>
-            </>
+            // Default state before submission completes (or if step somehow reached prematurely)
+            // Render nothing or a placeholder. Avoid showing failure by default.
+            <Typography variant="body2" color="text.secondary">
+              Hoàn tất quá trình đăng ký tại bước trước.
+            </Typography>
           )}
         </Box>
       ),
     },
   ];
 
-  return (
-    <Box sx={{ padding: 3 }}>
-      <Box sx={{ mb: 3 }}>
-        <Button
-          variant="outlined"
-          startIcon={<ArrowBack />}
-          onClick={() => navigate("/student/classes")}
-          sx={{ mb: 2 }}
-        >
-          Quay lại
-        </Button>
-        <Typography variant="h4" gutterBottom>
-          Đăng ký khuôn mặt
-        </Typography>
-        <Typography variant="subtitle1" color="text.secondary">
-          Đăng ký khuôn mặt của bạn để sử dụng tính năng điểm danh tự động
-        </Typography>
-      </Box>
+  // --- Render Logic ---
 
-      <Paper
-        sx={{
-          p: { xs: 2, md: 3 },
-          maxWidth: 1200,
-          mx: "auto",
-          overflow: "hidden",
-        }}
-      >
-        {isLoading && activeStep === 0 ? (
-          <Box
-            sx={{
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              py: 8,
-            }}
+  if (checkingFaceStatus || authLoading) {
+    return (
+      <Container maxWidth="sm" sx={{ textAlign: "center", mt: 5 }}>
+        <CircularProgress />
+        <Typography sx={{ mt: 2 }}>
+          Đang kiểm tra trạng thái đăng ký...
+        </Typography>
+      </Container>
+    );
+  }
+
+  if (hasFaceRegistered && !allowRegistration) {
+    return (
+      <Container maxWidth="sm" sx={{ mt: 4 }}>
+        <Paper elevation={3} sx={{ p: 4, textAlign: "center" }}>
+          <FaceRetouchingNatural color="success" sx={{ fontSize: 60, mb: 2 }} />
+          <Typography variant="h5" gutterBottom>
+            Đã có dữ liệu khuôn mặt
+          </Typography>
+          <Typography paragraph color="text.secondary">
+            Hệ thống đã ghi nhận dữ liệu khuôn mặt của bạn.
+          </Typography>
+          <Stack
+            direction="row"
+            spacing={2}
+            justifyContent="center"
+            sx={{ mt: 3 }}
           >
-            <CircularProgress />
-            <Typography variant="h6" sx={{ ml: 2 }}>
-              Đang tải...
-            </Typography>
-          </Box>
-        ) : (
-          <Stepper activeStep={activeStep} orientation="vertical">
-            {steps.map((step, index) => (
-              <Step key={step.label}>
-                <StepLabel>
-                  <Typography variant="subtitle1">{step.label}</Typography>
-                </StepLabel>
-                <StepContent>
-                  <Typography
-                    variant="body2"
-                    color="text.secondary"
-                    sx={{ mb: 2 }}
-                  >
-                    {step.description}
-                  </Typography>
+            <Button
+              variant="contained"
+              onClick={navigateToProfile}
+              startIcon={<Person />}
+            >
+              Xem hồ sơ
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handleAllowReRegistration}
+              startIcon={<Replay />}
+            >
+              Đăng ký lại
+            </Button>
+          </Stack>
+        </Paper>
+      </Container>
+    );
+  }
+
+  return (
+    <Container maxWidth="md" sx={{ mt: 4, mb: 4 }}>
+      <Paper elevation={3} sx={{ p: { xs: 2, sm: 3 } }}>
+        <Stack
+          direction="row"
+          justifyContent="space-between"
+          alignItems="center"
+          mb={2}
+        >
+          <Typography variant="h4" component="h1">
+            Đăng ký khuôn mặt
+          </Typography>
+          <Button
+            startIcon={<HelpOutline />}
+            onClick={() => setShowHelpDialog(true)}
+            size="small"
+          >
+            Trợ giúp
+          </Button>
+        </Stack>
+        <Divider sx={{ mb: 3 }} />
+
+        <Stepper activeStep={activeStep} orientation="vertical">
+          {steps.map((step, index) => (
+            <Step key={step.label} expanded={true}>
+              <StepLabel
+                icon={
+                  index === activeStep ? (
+                    <CircularProgress size={24} />
+                  ) : index < activeStep ? (
+                    <Check />
+                  ) : (
+                    index + 1
+                  )
+                }
+              >
+                <Typography variant={activeStep === index ? "h6" : "body1"}>
+                  {step.label}
+                </Typography>
+              </StepLabel>
+              <StepContent TransitionProps={{ unmountOnExit: false }}>
+                <Box sx={{ mb: 2, mt: 1, pl: { xs: 0, sm: 1 } }}>
                   {step.content}
-                </StepContent>
-              </Step>
-            ))}
-          </Stepper>
-        )}
+                  {activeStep < steps.length - 1 && (
+                    <Box sx={{ mt: 3, mb: 1 }}>
+                      <Button
+                        variant="contained"
+                        onClick={handleNext}
+                        disabled={
+                          (index === 1 &&
+                            (!capturedFaceData ||
+                              capturedFaceData.length < REQUIRED_IMAGES)) ||
+                          isSubmitting
+                        }
+                        sx={{ mr: 1 }}
+                      >
+                        Tiếp tục
+                      </Button>
+                      <Button
+                        disabled={index === 0 || isSubmitting}
+                        onClick={handleBack}
+                      >
+                        Quay lại
+                      </Button>
+                      {index > 0 && (
+                        <Button
+                          onClick={handleReset}
+                          sx={{ ml: 2 }}
+                          color="warning"
+                          disabled={isSubmitting}
+                        >
+                          Bắt đầu lại
+                        </Button>
+                      )}
+                    </Box>
+                  )}
+                </Box>
+              </StepContent>
+            </Step>
+          ))}
+        </Stepper>
       </Paper>
 
-      {/* Dialog hướng dẫn chi tiết */}
-      <Dialog
-        open={showHelpDialog}
-        onClose={() => setShowHelpDialog(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>Hướng dẫn đăng ký khuôn mặt chi tiết</DialogTitle>
+      <Dialog open={showHelpDialog} onClose={() => setShowHelpDialog(false)}>
+        <DialogTitle>Hướng dẫn Đăng ký Khuôn mặt</DialogTitle>
         <DialogContent>
-          <Typography variant="h6" gutterBottom>
-            Các bước đăng ký khuôn mặt:
-          </Typography>
-          <List>
+          <List dense>
+            <ListItem>
+              <ListItemIcon>
+                <Info />
+              </ListItemIcon>
+              <ListItemText primary="Mục đích: Đăng ký dữ liệu khuôn mặt để hệ thống có thể nhận diện bạn." />
+            </ListItem>
+            <ListItem>
+              <ListItemIcon>
+                <HelpOutline />
+              </ListItemIcon>
+              <ListItemText
+                primary={`Chuẩn bị: Ngồi ở nơi đủ sáng, không đeo kính râm hoặc khẩu trang. Giữ khuôn mặt thẳng, nhìn vào camera.`}
+              />
+            </ListItem>
+            <ListItem>
+              <ListItemIcon>
+                <CameraAlt />
+              </ListItemIcon>
+              <ListItemText
+                primary={`Chụp ảnh: Nhấn nút 'Chụp ảnh' ${REQUIRED_IMAGES} lần. Có thể bật landmark để căn chỉnh.`}
+              />
+            </ListItem>
             <ListItem>
               <ListItemIcon>
                 <Check />
               </ListItemIcon>
               <ListItemText
-                primary="Bước 1: Chuẩn bị"
-                secondary="Đảm bảo bạn đang ở nơi có ánh sáng tốt và camera hoạt động bình thường."
+                primary={`Xác nhận & Hoàn thành: Xem lại ${REQUIRED_IMAGES} ảnh đã chụp, sau đó nhấn 'Đăng ký'.`}
               />
             </ListItem>
             <ListItem>
               <ListItemIcon>
-                <Camera />
+                <ErrorOutline />
               </ListItemIcon>
-              <ListItemText
-                primary="Bước 2: Chụp ảnh khuôn mặt"
-                secondary="Chụp 5 ảnh khuôn mặt ở các góc độ khác nhau."
-              />
+              <ListItemText primary="Lỗi: Nếu không nhận diện được khuôn mặt, hãy thử lại ở góc độ hoặc ánh sáng khác. Nếu lỗi tiếp diễn, liên hệ hỗ trợ." />
             </ListItem>
             <ListItem>
               <ListItemIcon>
-                <ViewArray />
+                <Replay />
               </ListItemIcon>
-              <ListItemText
-                primary="Bước 3: Xác nhận thông tin"
-                secondary="Xem lại thông tin và ảnh đã chụp."
-              />
-            </ListItem>
-            <ListItem>
-              <ListItemIcon>
-                <SaveAlt />
-              </ListItemIcon>
-              <ListItemText
-                primary="Bước 4: Hoàn tất đăng ký"
-                secondary="Hoàn tất quá trình đăng ký khuôn mặt."
-              />
-            </ListItem>
-          </List>
-
-          <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-            Lưu ý khi chụp ảnh:
-          </Typography>
-          <List>
-            <ListItem>
-              <ListItemIcon>
-                <Info />
-              </ListItemIcon>
-              <ListItemText
-                primary="Ánh sáng"
-                secondary="Đảm bảo khuôn mặt được chiếu sáng tốt, tránh ngược sáng."
-              />
-            </ListItem>
-            <ListItem>
-              <ListItemIcon>
-                <Info />
-              </ListItemIcon>
-              <ListItemText
-                primary="Góc độ"
-                secondary="Chụp ở các góc độ khác nhau: nhìn thẳng, nghiêng trái, nghiêng phải, hơi ngước lên, hơi cúi xuống."
-              />
-            </ListItem>
-            <ListItem>
-              <ListItemIcon>
-                <Info />
-              </ListItemIcon>
-              <ListItemText
-                primary="Phụ kiện"
-                secondary="Không đeo kính, mũ, khẩu trang hoặc bất kỳ vật che khuôn mặt nào."
-              />
-            </ListItem>
-            <ListItem>
-              <ListItemIcon>
-                <Info />
-              </ListItemIcon>
-              <ListItemText
-                primary="Khoảng cách"
-                secondary="Giữ khuôn mặt ở khoảng cách vừa phải, chiếm khoảng 70% khung hình."
-              />
+              <ListItemText primary="Đăng ký lại: Nếu muốn cập nhật ảnh khuôn mặt, bạn có thể chọn 'Đăng ký lại' từ màn hình thông báo." />
             </ListItem>
           </List>
         </DialogContent>
@@ -806,8 +628,22 @@ const FaceRegistrationPage = () => {
           <Button onClick={() => setShowHelpDialog(false)}>Đóng</Button>
         </DialogActions>
       </Dialog>
-    </Box>
+    </Container>
   );
 };
 
-export default FaceRegistrationPage;
+// Wrapper for lazy loading Webcam
+const FaceRegistrationPageWithSuspense = () => (
+  <Suspense
+    fallback={
+      <Container maxWidth="sm" sx={{ textAlign: "center", mt: 5 }}>
+        <CircularProgress />
+        <Typography sx={{ mt: 2 }}>Đang tải thành phần...</Typography>
+      </Container>
+    }
+  >
+    <FaceRegistrationPage />
+  </Suspense>
+);
+
+export default FaceRegistrationPageWithSuspense;

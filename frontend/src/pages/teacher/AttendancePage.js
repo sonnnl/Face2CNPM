@@ -180,7 +180,6 @@ const AttendancePage = () => {
   const [manualDialogOpen, setManualDialogOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [manualAttendanceData, setManualAttendanceData] = useState({
-    status: "present",
     note: "",
   });
   const [componentError, setComponentError] = useState(null); // For non-API errors
@@ -225,6 +224,15 @@ const AttendancePage = () => {
         setSessionInfo(loadedSessionInfo);
         setAttendanceLogs(logsRes.data.data);
 
+        // Nếu phiên đã hoàn thành, không cần tải mô hình nhận dạng
+        const isSessionCompleted = loadedSessionInfo?.status === "completed";
+
+        if (isSessionCompleted) {
+          // Không cần tải mô hình và đặc trưng khuôn mặt nếu phiên đã hoàn thành
+          setIsLoading(false);
+          return;
+        }
+
         // Load models if not already loaded
         if (!isModelLoaded) {
           // Capture the return value indicating success/failure
@@ -241,7 +249,7 @@ const AttendancePage = () => {
         }
 
         // Fetch face features only if session is not completed and models are loaded
-        if (loadedSessionInfo?.status !== "completed" && isModelLoaded) {
+        if (!isSessionCompleted && isModelLoaded) {
           await dispatch(getClassFaceFeatures(classId)).unwrap();
         }
       } catch (error) {
@@ -570,7 +578,7 @@ const AttendancePage = () => {
   const openManualAttendanceDialog = (student) => {
     if (!student) return;
     setSelectedStudent(student);
-    setManualAttendanceData({ status: "present", note: "" }); // Reset form
+    setManualAttendanceData({ note: "" }); // Chỉ cần reset note
     setManualDialogOpen(true);
   };
 
@@ -580,7 +588,7 @@ const AttendancePage = () => {
     setSelectedStudent(null);
   };
 
-  // Handle manual attendance form change
+  // Handle manual attendance form change (chỉ còn note)
   const handleManualAttendanceChange = (e) => {
     setManualAttendanceData({
       ...manualAttendanceData,
@@ -593,11 +601,12 @@ const AttendancePage = () => {
     if (!selectedStudent || isProcessing) return;
 
     try {
+      // Chỉ gửi sessionId, studentId và note
       const result = await dispatch(
         manualAttendance({
           sessionId,
           studentId: selectedStudent._id,
-          status: manualAttendanceData.status,
+          // status: manualAttendanceData.status, // Bỏ status
           note: manualAttendanceData.note,
         })
       ).unwrap();
@@ -607,18 +616,24 @@ const AttendancePage = () => {
         const existingLogIndex = prevLogs.findIndex(
           (log) => log.student_id?._id === selectedStudent._id
         );
-        const newLog = { ...result.data, student_id: selectedStudent }; // Use the selected student data
+        // Đảm bảo log mới có status là 'present'
+        const newLogData = {
+          ...result.data,
+          status: "present",
+          student_id: selectedStudent,
+        };
+
         if (existingLogIndex > -1) {
           const updatedLogs = [...prevLogs];
-          updatedLogs[existingLogIndex] = newLog;
+          updatedLogs[existingLogIndex] = newLogData;
           return updatedLogs;
         } else {
-          return [...prevLogs, newLog];
+          return [...prevLogs, newLogData];
         }
       });
 
       enqueueSnackbar(
-        `Đã điểm danh thủ công cho ${selectedStudent.full_name}`,
+        `Đã điểm danh thủ công (Có mặt) cho ${selectedStudent.full_name}`,
         { variant: "success" }
       );
       handleManualDialogClose();
@@ -796,17 +811,23 @@ const AttendancePage = () => {
   const completeSession = async () => {
     if (isProcessing) return;
     try {
+      // Lấy danh sách sinh viên vắng mặt từ UI
+      const absentStudentIds = absentStudents.map((student) => student._id);
+
       enqueueSnackbar("Đang kết thúc phiên...", { variant: "info" });
+
       await axios.put(
         `${API_URL}/attendance/sessions/${sessionId}`,
-        { status: "completed" },
+        {
+          status: "completed",
+          students_absent: absentStudentIds,
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+
       enqueueSnackbar("Phiên điểm danh đã kết thúc", { variant: "success" });
-      setSessionInfo((prev) => ({ ...prev, status: "completed" })); // Update local state
-      stopAutoAttendance(); // Stop auto mode if running
-      // Optionally navigate back after a delay
-      // setTimeout(() => navigate(`/teacher/classes/${classId}`), 1000);
+      setSessionInfo((prev) => ({ ...prev, status: "completed" }));
+      stopAutoAttendance();
     } catch (error) {
       console.error("Lỗi khi kết thúc phiên:", error);
       enqueueSnackbar(
@@ -1025,12 +1046,22 @@ const AttendancePage = () => {
                 alignItems: "center",
               }}
             >
-              {!isModelLoaded && !sessionCompleted ? (
+              {sessionCompleted ? (
+                <Box textAlign="center" color="white" p={4}>
+                  <Info sx={{ fontSize: 60, mb: 2 }} />
+                  <Typography variant="h6">
+                    Phiên điểm danh đã kết thúc
+                  </Typography>
+                  <Typography variant="body2" mt={1}>
+                    Bạn có thể xem kết quả điểm danh ở danh sách bên phải
+                  </Typography>
+                </Box>
+              ) : !isModelLoaded ? (
                 <Box textAlign="center" color="white">
                   <CircularProgress color="inherit" />
                   <Typography>Đang tải mô hình nhận diện...</Typography>
                 </Box>
-              ) : !sessionCompleted ? (
+              ) : (
                 <Suspense
                   fallback={
                     <Box textAlign="center" color="white">
@@ -1063,22 +1094,22 @@ const AttendancePage = () => {
                     onUserMediaError={handleUserMediaError}
                   />
                 </Suspense>
-              ) : (
-                <Typography color="white">Phiên đã kết thúc</Typography> // Placeholder if session completed
               )}
 
-              {/* Canvas for Overlays */}
-              <canvas
-                ref={canvasRef}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  height: "100%",
-                  zIndex: 10,
-                }}
-              />
+              {/* Canvas for Overlays - chỉ hiển thị nếu phiên chưa kết thúc */}
+              {!sessionCompleted && (
+                <canvas
+                  ref={canvasRef}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: "100%",
+                    zIndex: 10,
+                  }}
+                />
+              )}
 
               {/* Camera Error/Loading Overlay */}
               {(!isCameraReady || componentError?.includes("camera")) &&
@@ -1358,7 +1389,7 @@ const AttendancePage = () => {
                                 variant="caption"
                                 color="text.secondary"
                               >
-                                {student.student_code}
+                                {student.student_id}
                               </Typography>
                             }
                           />
@@ -1380,7 +1411,7 @@ const AttendancePage = () => {
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Điểm danh thủ công</DialogTitle>
+        <DialogTitle>Điểm danh thủ công (Ghi nhận Có mặt)</DialogTitle>
         <DialogContent>
           {selectedStudent && (
             <Box display="flex" alignItems="center" mb={2}>
@@ -1394,25 +1425,11 @@ const AttendancePage = () => {
                   {selectedStudent.full_name}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  MSSV: {selectedStudent.student_code}
+                  MSSV: {selectedStudent.school_info?.student_id || "N/A"}
                 </Typography>
               </Box>
             </Box>
           )}
-          <FormControl fullWidth margin="normal">
-            <InputLabel>Trạng thái</InputLabel>
-            <Select
-              name="status"
-              value={manualAttendanceData.status}
-              onChange={handleManualAttendanceChange}
-              label="Trạng thái"
-            >
-              <MenuItem value="present">Có mặt</MenuItem>
-              <MenuItem value="absent">Vắng mặt</MenuItem>
-              <MenuItem value="late">Đi trễ</MenuItem>
-              <MenuItem value="early_leave">Về sớm</MenuItem>
-            </Select>
-          </FormControl>
           <TextField
             fullWidth
             margin="normal"
@@ -1422,6 +1439,7 @@ const AttendancePage = () => {
             onChange={handleManualAttendanceChange}
             multiline
             rows={2}
+            placeholder="Nhập lý do điểm danh thủ công (nếu có)"
           />
         </DialogContent>
         <DialogActions>
@@ -1432,7 +1450,7 @@ const AttendancePage = () => {
             color="primary"
             disabled={isProcessing}
           >
-            Xác nhận
+            Xác nhận Có mặt
           </Button>
         </DialogActions>
       </Dialog>

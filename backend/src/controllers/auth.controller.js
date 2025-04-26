@@ -242,7 +242,18 @@ exports.register = async (req, res) => {
 // @access  Private
 exports.getCurrentUser = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("-password");
+    // Lấy thông tin người dùng và chọn các trường cần thiết, bao gồm cả school_info
+    const user = await User.findById(req.user.id)
+      .select(
+        "_id email full_name role status school_info contact faceFeatures avatar_url"
+      )
+      .lean(); // Sử dụng lean() để có plain JavaScript object
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Người dùng không tồn tại" });
+    }
 
     res.status(200).json({
       success: true,

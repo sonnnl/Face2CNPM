@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
+import { getCurrentUser } from "./redux/slices/authSlice";
 
 // Pages
 import LoginPage from "./pages/LoginPage";
@@ -16,6 +17,7 @@ import ProfilePage from "./pages/ProfilePage";
 // Student Pages
 import StudentClassesPage from "./pages/student/ClassesPage";
 import StudentAttendancePage from "./pages/student/AttendancePage";
+import StudentScoresPage from "./pages/student/ScoresPage";
 
 // Teacher Pages
 import TeacherClassesPage from "./pages/teacher/ClassesPage";
@@ -41,9 +43,23 @@ import MinimalLayout from "./layouts/MinimalLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 const App = () => {
-  const { isAuthenticated, user } = useSelector((state) => state.auth);
+  const dispatch = useDispatch();
+  const { isAuthenticated, user, token } = useSelector((state) => state.auth);
 
-  // Hàm kiểm tra vai trò
+  useEffect(() => {
+    const storedToken = localStorage.getItem("token");
+    if (storedToken && !user && token === storedToken) {
+      console.log("[Debug] App.js: Dispatching getCurrentUser on load.");
+      dispatch(getCurrentUser());
+    } else {
+      console.log("[Debug] App.js: Not dispatching getCurrentUser on load.", {
+        storedTokenPresent: !!storedToken,
+        userPresent: !!user,
+        tokenMatch: token === storedToken,
+      });
+    }
+  }, [dispatch, user, token]);
+
   const hasRole = (role) => {
     if (!user) return false;
     return user.role === role;
@@ -98,6 +114,14 @@ const App = () => {
             element={
               <ProtectedRoute roles={["student"]}>
                 <StudentAttendancePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="scores"
+            element={
+              <ProtectedRoute roles={["student"]}>
+                <StudentScoresPage />
               </ProtectedRoute>
             }
           />

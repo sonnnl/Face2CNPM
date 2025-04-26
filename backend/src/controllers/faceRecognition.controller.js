@@ -62,7 +62,7 @@ exports.getClassFaceFeatures = async (req, res) => {
     // Tìm danh sách sinh viên trong lớp
     const teachingClass = await TeachingClass.findById(classId).populate({
       path: "students",
-      select: "full_name student_code faceFeatures avatar_url",
+      select: "full_name student_id faceFeatures avatar_url",
     });
 
     if (!teachingClass) {
@@ -83,7 +83,7 @@ exports.getClassFaceFeatures = async (req, res) => {
       .map((student) => ({
         _id: student._id,
         full_name: student.full_name,
-        student_code: student.student_code,
+        student_id: student.school_info?.student_id,
         avatar_url: student.avatar_url,
         faceDescriptors: student.faceFeatures.descriptors,
       }));
@@ -234,12 +234,13 @@ exports.verifyAttendance = async (req, res) => {
 // @access  Private (Chỉ giáo viên)
 exports.manualAttendance = async (req, res) => {
   try {
-    const { sessionId, studentId, status, note } = req.body;
+    const { sessionId, studentId, note } = req.body;
 
-    if (!sessionId || !studentId || !status) {
+    // Kiểm tra sessionId và studentId
+    if (!sessionId || !studentId) {
       return res.status(400).json({
         success: false,
-        message: "Thiếu dữ liệu điểm danh",
+        message: "Thiếu ID phiên hoặc ID sinh viên",
       });
     }
 
@@ -253,6 +254,7 @@ exports.manualAttendance = async (req, res) => {
       });
     }
 
+    // Chỉ cho phép điểm danh thủ công khi phiên đang active
     if (session.status !== "active") {
       return res.status(400).json({
         success: false,
@@ -260,7 +262,7 @@ exports.manualAttendance = async (req, res) => {
       });
     }
 
-    // Kiểm tra và cập nhật log điểm danh
+    // Tìm hoặc tạo log điểm danh, luôn là 'present'
     let attendanceLog = await AttendanceLog.findOne({
       session_id: sessionId,
       student_id: studentId,
@@ -268,9 +270,9 @@ exports.manualAttendance = async (req, res) => {
 
     if (attendanceLog) {
       // Cập nhật log nếu đã tồn tại
-      attendanceLog.status = status;
-      attendanceLog.recognized = false;
-      attendanceLog.note = note;
+      attendanceLog.status = "present"; // Luôn là present
+      attendanceLog.recognized = false; // Đánh dấu là không nhận diện tự động
+      attendanceLog.note = note; // Cập nhật ghi chú nếu có
       attendanceLog.timestamp = Date.now();
 
       await attendanceLog.save();
@@ -279,56 +281,46 @@ exports.manualAttendance = async (req, res) => {
       attendanceLog = await AttendanceLog.create({
         session_id: sessionId,
         student_id: studentId,
-        status,
-        recognized: false,
-        note,
+        status: "present", // Luôn là present
+        recognized: false, // Đánh dấu là không nhận diện tự động
+        note: note, // Thêm ghi chú nếu có
         timestamp: Date.now(),
       });
     }
 
-    // Cập nhật danh sách sinh viên có mặt/vắng mặt
-    if (status === "present") {
-      // Thêm vào danh sách có mặt
-      if (
-        !session.students_present.some(
-          (entry) => entry.student_id.toString() === studentId
-        )
-      ) {
-        session.students_present.push({
-          student_id: studentId,
-          timestamp: Date.now(),
-          check_type: "manual",
-        });
-      }
-
-      // Xóa khỏi danh sách vắng mặt
-      session.students_absent = session.students_absent.filter(
-        (id) => id.toString() !== studentId
-      );
-    } else {
-      // Thêm vào danh sách vắng mặt
-      if (!session.students_absent.includes(studentId)) {
-        session.students_absent.push(studentId);
-      }
-
-      // Xóa khỏi danh sách có mặt
-      session.students_present = session.students_present.filter(
-        (entry) => entry.student_id.toString() !== studentId
-      );
+    // Cập nhật danh sách sinh viên có mặt/vắng mặt trong session
+    // Luôn thêm vào danh sách có mặt
+    if (
+      !session.students_present.some(
+        (entry) => entry.student_id.toString() === studentId
+      )
+    ) {
+      session.students_present.push({
+        student_id: studentId,
+        timestamp: Date.now(),
+        check_type: "manual", // Đánh dấu là điểm danh thủ công
+      });
     }
 
+    // Luôn xóa khỏi danh sách vắng mặt (nếu có)
+    session.students_absent = session.students_absent.filter(
+      (id) => id.toString() !== studentId
+    );
+
+    // Lưu thay đổi của session
     await session.save();
 
     res.status(200).json({
       success: true,
-      message: "Điểm danh thủ công thành công",
-      data: attendanceLog,
+      message: "Điểm danh thủ công thành công (đã ghi nhận có mặt)",
+      data: attendanceLog, // Trả về log đã tạo/cập nhật
     });
   } catch (error) {
-    console.error(error);
+    console.error("Lỗi điểm danh thủ công:", error);
     res.status(500).json({
       success: false,
       message: "Lỗi máy chủ",
+      error: error.message,
     });
   }
 };

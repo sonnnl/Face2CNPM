@@ -429,9 +429,9 @@ const UsersPage = () => {
                         <Typography variant="body1">
                           {user.full_name}
                         </Typography>
-                        {user.school_info?.student_code && (
+                        {user.school_info?.student_id && (
                           <Typography variant="caption" color="textSecondary">
-                            MSSV: {user.school_info.student_code}
+                            MSSV: {user.school_info.student_id}
                           </Typography>
                         )}
                       </Box>
