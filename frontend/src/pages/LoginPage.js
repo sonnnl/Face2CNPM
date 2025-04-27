@@ -204,7 +204,6 @@ const LoginPage = () => {
         process.env.REACT_APP_API_URL || "http://localhost:5000/api";
       // Thêm timestamp để tránh cache
       const redirectUrl = `${apiUrl}/auth/google?t=${Date.now()}`;
-      console.log("Redirecting to:", redirectUrl);
       window.location.href = redirectUrl;
     } catch (error) {
       console.error("Google login error:", error);
@@ -253,10 +252,18 @@ const LoginPage = () => {
         <Paper
           elevation={3}
           sx={{
-            padding: 4,
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            padding: "32px",
+            borderRadius: "12px",
             width: "100%",
-            borderRadius: 3,
+            animation: "fadeIn 0.5s ease-out forwards",
+            transition: "transform 0.3s ease, box-shadow 0.3s ease",
+            "&:hover": {
+              transform: "scale(1.01)",
+              boxShadow: "0px 8px 20px rgba(0, 0, 0, 0.15)",
+            },
           }}
+          className="login-paper"
         >
           <Typography component="h1" variant="h4" align="center" gutterBottom>
             Đăng Nhập
@@ -326,7 +333,15 @@ const LoginPage = () => {
               type="submit"
               fullWidth
               variant="contained"
-              sx={{ mt: 3, mb: 2, py: 1.5 }}
+              sx={{
+                mt: 3,
+                mb: 2,
+                py: 1.5,
+                transition: "background-color 0.3s ease, transform 0.2s ease",
+                "&:hover": {
+                  transform: "scale(1.02)",
+                },
+              }}
               disabled={localLoading}
               color="primary"
             >
@@ -365,7 +380,13 @@ const LoginPage = () => {
               }
               onClick={handleGoogleLogin}
               disabled={googleLoading}
-              sx={{ py: 1.5 }}
+              sx={{
+                py: 1.5,
+                transition: "background-color 0.3s ease, transform 0.2s ease",
+                "&:hover": {
+                  transform: "scale(1.02)",
+                },
+              }}
             >
               {googleLoading ? "Đang xử lý..." : "Đăng nhập bằng Google"}
             </Button>

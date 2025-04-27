@@ -6,7 +6,6 @@ const {
   StudentScore,
   AttendanceSession,
   AttendanceLog,
-  ActivityLog,
   Semester,
 } = require("../models/schemas");
 const mongoose = require("mongoose");
@@ -1534,23 +1533,6 @@ exports.approveStudent = async (req, res) => {
       data: {
         class_id: id,
         class_name: mainClass.name,
-      },
-    });
-
-    // Ghi log hoạt động
-    await ActivityLog.create({
-      user_id: req.user.id,
-      action: "approve_student",
-      details: {
-        main_class_id: id,
-        main_class_name: mainClass.name,
-        student_id: studentId,
-        student_name: student.fullName,
-        has_face_data: !!(
-          student.faceFeatures &&
-          student.faceFeatures.descriptors &&
-          student.faceFeatures.descriptors.length > 0
-        ),
       },
     });
 

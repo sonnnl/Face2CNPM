@@ -144,7 +144,7 @@ const FaceRegistrationPage = () => {
 
   // 3. Monitor camera readiness (using callback now)
   const handleUserMedia = () => {
-    console.log("Camera is ready.");
+    // console.log("Camera is ready.");
   };
 
   const handleUserMediaError = (error) => {
@@ -197,7 +197,7 @@ const FaceRegistrationPage = () => {
   };
 
   const submitRegistration = async () => {
-    console.log('"Đăng ký khuôn mặt" button clicked. Starting submission...');
+    // console.log('\"Đăng ký khuôn mặt\" button clicked. Starting submission...');
     if (
       !capturedFaceData ||
       capturedFaceData.length < REQUIRED_IMAGES ||

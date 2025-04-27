@@ -20,7 +20,6 @@ export const loadFaceDetectionModels = async (modelsUrl = "/models") => {
     ]);
 
     modelsLoaded = true;
-    console.log("Đã tải xong các mô hình face-api.js");
     return true;
   } catch (error) {
     console.error("Lỗi khi tải mô hình face-api.js:", error);

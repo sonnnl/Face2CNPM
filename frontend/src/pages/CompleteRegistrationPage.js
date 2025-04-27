@@ -18,7 +18,6 @@ import {
   Avatar,
   Grid,
   FormHelperText,
-  Autocomplete,
   Card,
   CardContent,
   CardActionArea,
@@ -50,11 +49,9 @@ const CompleteRegistrationPage = () => {
   const location = useLocation();
   const { enqueueSnackbar } = useSnackbar();
   const [isLoading, setIsLoading] = useState(false);
-  const [advisors, setAdvisors] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [mainClasses, setMainClasses] = useState([]);
   const [filteredClasses, setFilteredClasses] = useState([]);
-  const [loadingAdvisors, setLoadingAdvisors] = useState(false);
   const [loadingDepartments, setLoadingDepartments] = useState(false);
   const [loadingClasses, setLoadingClasses] = useState(false);
   const [showRoleSelection, setShowRoleSelection] = useState(true);
@@ -83,13 +80,11 @@ const CompleteRegistrationPage = () => {
     major: "",
     class: "",
     year: new Date().getFullYear(),
-    advisorId: "",
   });
 
   const [formErrors, setFormErrors] = useState({
     role: "",
     fullName: "",
-    advisorId: "",
     department: "",
     class: "",
   });
@@ -118,13 +113,6 @@ const CompleteRegistrationPage = () => {
     fetchMainClasses();
   }, []);
 
-  // Lấy danh sách giáo viên cố vấn khi người dùng chọn vai trò sinh viên
-  useEffect(() => {
-    if (formData.role === "student") {
-      fetchAdvisors();
-    }
-  }, [formData.role]);
-
   // Lọc danh sách lớp theo khoa được chọn
   useEffect(() => {
     if (formData.department && mainClasses.length > 0) {
@@ -133,33 +121,10 @@ const CompleteRegistrationPage = () => {
           cls.department_id && cls.department_id._id === formData.department
       );
       setFilteredClasses(filtered);
-
-      // Log để kiểm tra
-      console.log("Department ID:", formData.department);
-      console.log("Main Classes:", mainClasses);
-      console.log("Filtered Classes:", filtered);
     } else {
       setFilteredClasses([]);
     }
   }, [formData.department, mainClasses]);
-
-  const fetchAdvisors = async () => {
-    setLoadingAdvisors(true);
-    try {
-      const response = await axios.get(`${API_URL}/users/teachers/public`);
-      if (response.data.success) {
-        setAdvisors(response.data.data);
-      }
-    } catch (error) {
-      console.error("Error fetching advisors:", error);
-      setAdvisors([]);
-      enqueueSnackbar("Không thể tải danh sách giáo viên cố vấn", {
-        variant: "error",
-      });
-    } finally {
-      setLoadingAdvisors(false);
-    }
-  };
 
   const fetchDepartments = async () => {
     setLoadingDepartments(true);
@@ -167,13 +132,16 @@ const CompleteRegistrationPage = () => {
       const response = await axios.get(`${API_URL}/departments/public`);
       if (response.data.success) {
         setDepartments(response.data.data);
+      } else {
+        setDepartments([]);
+        enqueueSnackbar(response.data.message || "Không thể tải khoa", {
+          variant: "error",
+        });
       }
     } catch (error) {
       console.error("Error fetching departments:", error);
       setDepartments([]);
-      enqueueSnackbar("Không thể tải danh sách khoa", {
-        variant: "error",
-      });
+      enqueueSnackbar("Lỗi tải danh sách khoa", { variant: "error" });
     } finally {
       setLoadingDepartments(false);
     }
@@ -187,13 +155,16 @@ const CompleteRegistrationPage = () => {
       );
       if (response.data.success) {
         setMainClasses(response.data.data);
+      } else {
+        setMainClasses([]);
+        enqueueSnackbar(response.data.message || "Không thể tải lớp", {
+          variant: "error",
+        });
       }
     } catch (error) {
       console.error("Error fetching main classes:", error);
       setMainClasses([]);
-      enqueueSnackbar("Không thể tải danh sách lớp", {
-        variant: "error",
-      });
+      enqueueSnackbar("Lỗi tải danh sách lớp", { variant: "error" });
     } finally {
       setLoadingClasses(false);
     }
@@ -206,13 +177,6 @@ const CompleteRegistrationPage = () => {
     // Xóa lỗi khi người dùng nhập
     if (formErrors[name]) {
       setFormErrors({ ...formErrors, [name]: "" });
-    }
-  };
-
-  const handleAdvisorChange = (event, newValue) => {
-    setFormData({ ...formData, advisorId: newValue?._id || "" });
-    if (formErrors.advisorId) {
-      setFormErrors({ ...formErrors, advisorId: "" });
     }
   };
 
@@ -239,15 +203,15 @@ const CompleteRegistrationPage = () => {
       valid = false;
     }
 
-    // Kiểm tra giáo viên cố vấn cho sinh viên
-    if (formData.role === "student" && !formData.advisorId) {
-      errors.advisorId = "Vui lòng chọn giáo viên cố vấn";
-      valid = false;
-    }
-
     // Kiểm tra khoa
     if (formData.role === "student" && !formData.department) {
       errors.department = "Vui lòng chọn khoa";
+      valid = false;
+    }
+
+    // Kiểm tra lớp
+    if (formData.role === "student" && !formData.class) {
+      errors.class = "Vui lòng chọn lớp";
       valid = false;
     }
 
@@ -256,15 +220,9 @@ const CompleteRegistrationPage = () => {
   };
 
   const handleFaceDataCapture = (capturedFaceData) => {
-    console.log(
-      "[CompleteRegistrationPage] Received face data:",
-      capturedFaceData
-    );
     if (capturedFaceData && capturedFaceData.length >= REQUIRED_IMAGES) {
       setFaceData(capturedFaceData);
       setIsFaceRegistrationComplete(true);
-      // Optionally close the accordion
-      // setFaceRegistrationExpanded(false);
       enqueueSnackbar("Đã chụp đủ ảnh khuôn mặt!", { variant: "success" });
     } else {
       // Handle reset case if component sends null/empty
@@ -291,11 +249,6 @@ const CompleteRegistrationPage = () => {
         avatarUrl: avatar,
       };
 
-      // Thêm thông tin cố vấn cho sinh viên
-      if (formData.role === "student" && formData.advisorId) {
-        registrationData.advisor_id = formData.advisorId;
-      }
-
       // Tìm thông tin khoa được chọn
       const selectedDepartment = departments.find(
         (dept) => dept._id === formData.department
@@ -312,20 +265,15 @@ const CompleteRegistrationPage = () => {
           ? selectedDepartment.name
           : formData.department,
         department_id: formData.department,
-        major: formData.major,
+        major: formData.role === "student" ? formData.major : undefined,
         class: selectedClass ? selectedClass.name : formData.class,
-        class_id: formData.class,
-        year: formData.year,
+        class_id: formData.role === "student" ? formData.class : undefined,
+        year: formData.role === "student" ? formData.year : undefined,
+        student_id:
+          formData.role === "student" ? formData.studentId : undefined,
+        teacher_code:
+          formData.role === "teacher" ? formData.teacherCode : undefined,
       };
-
-      // Thêm mã sinh viên/giáo viên
-      if (formData.role === "student") {
-        if (formData.studentId) {
-          registrationData.school_info.student_id = formData.studentId;
-        }
-      } else if (formData.role === "teacher" && formData.teacherCode) {
-        registrationData.school_info.teacher_code = formData.teacherCode;
-      }
 
       // Thêm số điện thoại
       if (formData.phone) {
@@ -336,18 +284,12 @@ const CompleteRegistrationPage = () => {
 
       // Add face data ONLY IF registration was completed
       if (isFaceRegistrationComplete && faceData) {
-        console.log("Including face data in registration payload.");
         registrationData.faceFeatures = {
           descriptors: faceData.map((data) => data.descriptor),
           lastUpdated: new Date(), // Add timestamp
         };
-      } else {
-        console.log(
-          "Face registration not complete or no data, skipping faceFeatures."
-        );
       }
 
-      console.log("Submitting complete registration:", registrationData);
       const response = await axios.post(
         `${API_URL}/auth/google-complete`,
         registrationData
@@ -636,47 +578,6 @@ const CompleteRegistrationPage = () => {
                   onChange={handleChange}
                 />
               </Grid>
-
-              <Grid item xs={12}>
-                <Autocomplete
-                  id="advisorId"
-                  options={advisors}
-                  getOptionLabel={(option) =>
-                    `${option.full_name} (${option.email})`
-                  }
-                  loading={loadingAdvisors}
-                  onChange={handleAdvisorChange}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      required
-                      label="Giáo viên cố vấn"
-                      error={!!formErrors.advisorId}
-                      helperText={
-                        formErrors.advisorId ||
-                        "Vui lòng chọn giáo viên cố vấn của bạn"
-                      }
-                      InputProps={{
-                        ...params.InputProps,
-                        endAdornment: (
-                          <>
-                            {loadingAdvisors ? (
-                              <CircularProgress color="inherit" size={20} />
-                            ) : null}
-                            {params.InputProps.endAdornment}
-                          </>
-                        ),
-                      }}
-                    />
-                  )}
-                />
-                {advisors.length === 0 && !loadingAdvisors && (
-                  <Alert severity="warning" sx={{ mt: 1 }}>
-                    Không có giáo viên nào được tìm thấy. Vui lòng liên hệ với
-                    quản trị viên.
-                  </Alert>
-                )}
-              </Grid>
             </>
           )}
 
@@ -694,42 +595,44 @@ const CompleteRegistrationPage = () => {
           )}
         </Grid>
 
-        {/* Accordion for Face Registration */}
-        <Accordion
-          expanded={faceRegistrationExpanded}
-          onChange={() =>
-            setFaceRegistrationExpanded(!faceRegistrationExpanded)
-          }
-          sx={{ mt: 3 }}
-        >
-          <AccordionSummary expandIcon={<ExpandMore />}>
-            <Box sx={{ display: "flex", alignItems: "center" }}>
-              <Face sx={{ mr: 1 }} />
-              <Typography>Đăng ký khuôn mặt (tùy chọn)</Typography>
-              {/* Updated Chip based on completion state */}
-              {isFaceRegistrationComplete && (
-                <Chip
-                  label="Đã hoàn tất chụp ảnh"
-                  color="success"
-                  size="small"
-                  sx={{ ml: 2 }}
-                  icon={<Check fontSize="small" />}
-                />
-              )}
-            </Box>
-          </AccordionSummary>
-          <AccordionDetails>
-            <Alert severity="info" sx={{ mb: 2 }}>
-              Đăng ký khuôn mặt sẽ giúp giảng viên xác nhận danh tính và sử dụng
-              cho điểm danh tự động.
-            </Alert>
-            {/* Use the updated component with correct props */}
-            <FaceRegistrationComponent
-              onFaceDataCapture={handleFaceDataCapture}
-              requiredImages={REQUIRED_IMAGES} // Pass the required number
-            />
-          </AccordionDetails>
-        </Accordion>
+        {/* Accordion for Face Registration - Conditionally render based on role */}
+        {formData.role === "student" && (
+          <Accordion
+            expanded={faceRegistrationExpanded}
+            onChange={() =>
+              setFaceRegistrationExpanded(!faceRegistrationExpanded)
+            }
+            sx={{ mt: 3 }}
+          >
+            <AccordionSummary expandIcon={<ExpandMore />}>
+              <Box sx={{ display: "flex", alignItems: "center" }}>
+                <Face sx={{ mr: 1 }} />
+                <Typography>Đăng ký khuôn mặt (tùy chọn)</Typography>
+                {/* Updated Chip based on completion state */}
+                {isFaceRegistrationComplete && (
+                  <Chip
+                    label="Đã hoàn tất chụp ảnh"
+                    color="success"
+                    size="small"
+                    sx={{ ml: 2 }}
+                    icon={<Check fontSize="small" />}
+                  />
+                )}
+              </Box>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Đăng ký khuôn mặt sẽ giúp giảng viên xác nhận danh tính và sử
+                dụng cho điểm danh tự động.
+              </Alert>
+              {/* Use the updated component with correct props */}
+              <FaceRegistrationComponent
+                onFaceDataCapture={handleFaceDataCapture}
+                requiredImages={REQUIRED_IMAGES} // Pass the required number
+              />
+            </AccordionDetails>
+          </Accordion>
+        )}
 
         <Box sx={{ mt: 3, display: "flex", justifyContent: "space-between" }}>
           <Button variant="outlined" onClick={() => setShowRoleSelection(true)}>

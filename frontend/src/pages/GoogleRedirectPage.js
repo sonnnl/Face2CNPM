@@ -37,17 +37,6 @@ const GoogleRedirectPage = () => {
       const avatar = queryParams.get("avatar");
       const role = queryParams.get("role");
 
-      console.log("GoogleRedirectPage - Query params:", {
-        token,
-        statusParam,
-        needsRegistration,
-        email,
-        googleId,
-        name,
-        avatar,
-        role,
-      });
-
       // Nếu URL chứa token, có nghĩa là đăng nhập thành công
       if (token) {
         // Kiểm tra trạng thái người dùng
@@ -105,11 +94,9 @@ const GoogleRedirectPage = () => {
       else if (needsRegistration && email && googleId) {
         // Kiểm tra xem người dùng đã tồn tại chưa
         try {
-          console.log("Đang kiểm tra trạng thái người dùng:", email);
           const response = await axios.get(
             `${API_URL}/auth/check-status?email=${email}`
           );
-          console.log("Kết quả check-status:", response.data);
 
           if (response.data.exists) {
             // Nếu người dùng đã tồn tại
@@ -142,7 +129,6 @@ const GoogleRedirectPage = () => {
             }
           } else {
             // Nếu người dùng chưa tồn tại, chuyển đến trang đăng ký
-            console.log("Chuyển hướng đến trang đăng ký...");
             setStatus("redirect");
             setMessage("Chuyển hướng đến trang đăng ký...");
 

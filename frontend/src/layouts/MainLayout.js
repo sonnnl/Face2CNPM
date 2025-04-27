@@ -104,6 +104,18 @@ const MainLayout = () => {
           icon: <School />,
           path: "/student/classes",
           roles: ["student"],
+        },
+        {
+          text: "Điểm số",
+          icon: <ListAlt />,
+          path: "/student/scores",
+          roles: ["student"],
+        },
+        {
+          text: "Thông tin Giảng viên",
+          icon: <Groups />,
+          path: "/student/teachers",
+          roles: ["student"],
         }
       );
     }

@@ -94,8 +94,7 @@ exports.login = async (req, res) => {
 // @access  Public
 exports.register = async (req, res) => {
   try {
-    const { email, password, role, full_name, advisor_id, school_info } =
-      req.body;
+    const { email, password, role, full_name, school_info } = req.body;
 
     // Xác thực dữ liệu đầu vào
     if (!email || !password || !full_name) {
@@ -115,13 +114,42 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Nếu là sinh viên, yêu cầu phải có giáo viên cố vấn
-    if (role === "student" && !advisor_id) {
+    // --- Thêm validation chi tiết cho school_info ---
+    if (!school_info || !school_info.department_id) {
       return res.status(400).json({
         success: false,
-        message: "Vui lòng chọn giáo viên cố vấn",
+        message: "Vui lòng chọn khoa",
       });
     }
+
+    if (role === "student") {
+      if (!school_info.student_id) {
+        return res.status(400).json({
+          success: false,
+          message: "Vui lòng nhập Mã số sinh viên (MSSV)",
+        });
+      }
+      if (!school_info.class_id) {
+        return res.status(400).json({
+          success: false,
+          message: "Vui lòng chọn lớp",
+        });
+      }
+      if (!school_info.major) {
+        return res.status(400).json({
+          success: false,
+          message: "Vui lòng chọn ngành",
+        });
+      }
+    } else if (role === "teacher") {
+      if (!school_info.teacher_code) {
+        return res.status(400).json({
+          success: false,
+          message: "Vui lòng nhập Mã giảng viên",
+        });
+      }
+    }
+    // --- Kết thúc validation ---
 
     // Kiểm tra người dùng đã tồn tại
     const userExists = await User.findOne({ email });
@@ -148,59 +176,67 @@ exports.register = async (req, res) => {
       last_login: Date.now(),
     };
 
-    // Thêm thông tin bổ sung nếu có
-    if (advisor_id) {
-      userData.advisor_id = advisor_id;
+    // --- Xây dựng school_info có chọn lọc ---
+    const schoolInfoData = {
+      department_id: school_info.department_id,
+    };
+    if (role === "student") {
+      schoolInfoData.student_id = school_info.student_id;
+      schoolInfoData.class_id = school_info.class_id;
+      schoolInfoData.major = school_info.major;
+    } else if (role === "teacher") {
+      schoolInfoData.teacher_code = school_info.teacher_code;
     }
-
-    if (school_info) {
-      userData.school_info = school_info;
-    }
+    userData.school_info = schoolInfoData;
+    // --- Kết thúc xây dựng school_info ---
 
     const user = await User.create(userData);
 
     if (user) {
-      // Gửi thông báo đến admin hoặc giáo viên cố vấn
+      // Gửi thông báo đến admin
       if (role === "teacher") {
         // Gửi thông báo cho admin
         await Notification.create({
           title: "Đăng ký tài khoản giảng viên mới",
           content: `Giảng viên ${full_name} (${email}) đã đăng ký và đang chờ phê duyệt.`,
           sender_id: user._id,
-          // Không cần receiver_id vì gửi cho tất cả admin
         });
-      } else if (role === "student" && advisor_id) {
-        // Gửi thông báo cho giáo viên cố vấn
-        await Notification.create({
-          title: "Sinh viên mới đăng ký vào lớp",
-          content: `Sinh viên ${full_name} (${email}) đã đăng ký và đang chờ phê duyệt.`,
-          sender_id: user._id,
-          receiver_id: advisor_id,
-        });
-
-        // Nếu có mã lớp, tìm lớp chính tương ứng
-        if (school_info && school_info.class) {
+      } else if (role === "student") {
+        let assigned_advisor_id = null;
+        if (schoolInfoData.class_id) {
           try {
-            const mainClass = await MainClass.findOne({
-              class_code: school_info.class,
-            });
+            const mainClass = await MainClass.findById(schoolInfoData.class_id);
             if (mainClass) {
-              // Gửi thông báo cho giáo viên cố vấn của lớp (nếu khác với advisor_id đã chọn)
-              if (
-                mainClass.advisor_id &&
-                mainClass.advisor_id.toString() !== advisor_id.toString()
-              ) {
+              assigned_advisor_id = mainClass.advisor_id;
+              if (assigned_advisor_id) {
+                user.advisor_id = assigned_advisor_id;
+                await user.save();
+              }
+              if (!mainClass.pending_students) {
+                mainClass.pending_students = [];
+              }
+              if (!mainClass.pending_students.includes(user._id)) {
+                mainClass.pending_students.push(user._id);
+                await mainClass.save();
+                console.log(
+                  `Added student ${user._id} to pending list of class ${mainClass._id}`
+                );
+              }
+              if (assigned_advisor_id) {
                 await Notification.create({
                   title: "Sinh viên mới đăng ký vào lớp",
-                  content: `Sinh viên ${full_name} (${email}) đã đăng ký vào lớp ${mainClass.name} và đang chờ phê duyệt.`,
+                  content: `Sinh viên ${full_name} (${email}) đã đăng ký vào lớp ${mainClass.name} (${mainClass.class_code}) mà bạn làm cố vấn, đang chờ phê duyệt.`,
                   sender_id: user._id,
-                  receiver_id: mainClass.advisor_id,
+                  receiver_id: assigned_advisor_id,
                   main_class_id: mainClass._id,
                 });
               }
             }
           } catch (err) {
-            console.error("Lỗi khi tìm lớp chính:", err);
+            console.error(
+              "Lỗi khi xử lý lớp chính và cố vấn cho sinh viên đăng ký:",
+              err
+            );
           }
         }
       }
@@ -360,7 +396,6 @@ exports.completeGoogleSignup = async (req, res) => {
       fullName,
       role,
       avatarUrl,
-      advisor_id,
       school_info,
       contact,
       faceFeatures,
@@ -383,32 +418,40 @@ exports.completeGoogleSignup = async (req, res) => {
       });
     }
 
-    // Tạo người dùng mới
     const userData = {
       email,
       google_id: googleId,
       full_name: fullName,
       role,
       avatar_url: avatarUrl,
-      status: "pending", // Mặc định là chờ phê duyệt
+      status: "pending",
       created_at: Date.now(),
       last_login: Date.now(),
     };
 
-    // Thêm thông tin bổ sung nếu có
-    if (advisor_id) {
-      userData.advisor_id = advisor_id;
-    }
-
     if (school_info) {
-      userData.school_info = school_info;
+      const schoolInfoData = {
+        department_id: school_info.department_id,
+        department: school_info.department,
+      };
+      if (role === "student") {
+        schoolInfoData.student_id = school_info.student_id;
+        schoolInfoData.class_id = school_info.class_id;
+        schoolInfoData.major = school_info.major;
+        schoolInfoData.year = school_info.year;
+        schoolInfoData.class = school_info.class;
+      } else if (role === "teacher") {
+        schoolInfoData.teacher_code = school_info.teacher_code;
+      }
+      userData.school_info = schoolInfoData;
+    } else {
+      userData.school_info = {};
     }
 
     if (contact) {
       userData.contact = contact;
     }
 
-    // Thêm dữ liệu khuôn mặt nếu có
     if (
       faceFeatures &&
       faceFeatures.descriptors &&
@@ -423,51 +466,67 @@ exports.completeGoogleSignup = async (req, res) => {
       );
     }
 
+    let assigned_advisor_id = null;
+    let mainClass = null;
+
+    if (
+      role === "student" &&
+      userData.school_info &&
+      userData.school_info.class_id
+    ) {
+      try {
+        mainClass = await MainClass.findById(userData.school_info.class_id);
+        if (mainClass && mainClass.advisor_id) {
+          assigned_advisor_id = mainClass.advisor_id;
+          userData.advisor_id = assigned_advisor_id;
+        }
+      } catch (classError) {
+        console.error(
+          "Lỗi khi tìm lớp hoặc cố vấn cho Google Signup:",
+          classError
+        );
+      }
+    }
+
     const newUser = await User.create(userData);
 
-    // Thêm sinh viên vào danh sách pending_students của lớp nếu có class_id
-    if (role === "student" && school_info && school_info.class_id) {
+    if (role === "student" && mainClass) {
       try {
-        // Tìm lớp
-        const mainClass = await MainClass.findById(school_info.class_id);
-        if (mainClass) {
-          // Kiểm tra nếu pending_students chưa tồn tại thì khởi tạo
-          if (!mainClass.pending_students) {
-            mainClass.pending_students = [];
-          }
-
-          // Thêm sinh viên vào danh sách chờ phê duyệt
+        if (!mainClass.pending_students) {
+          mainClass.pending_students = [];
+        }
+        if (!mainClass.pending_students.includes(newUser._id)) {
           mainClass.pending_students.push(newUser._id);
           await mainClass.save();
           console.log(
             `Added student ${newUser._id} to pending list of class ${mainClass._id}`
           );
+        }
 
-          // Tạo thông báo cho giáo viên cố vấn
-          if (mainClass.advisor_id) {
-            try {
-              await Notification.create({
-                title: "Sinh viên mới đăng ký vào lớp",
-                content: `Sinh viên ${fullName} (${email}) đã đăng ký vào lớp ${mainClass.name} và đang chờ phê duyệt`,
-                sender_id: newUser._id,
-                receiver_id: mainClass.advisor_id,
-                main_class_id: mainClass._id,
-              });
-            } catch (notifError) {
-              console.error("Không thể tạo thông báo:", notifError);
-            }
+        if (assigned_advisor_id) {
+          try {
+            await Notification.create({
+              title: "Sinh viên mới đăng ký vào lớp (Google)",
+              content: `Sinh viên ${newUser.full_name} (${newUser.email}) đã đăng ký vào lớp ${mainClass.name} mà bạn làm cố vấn (qua Google) và đang chờ phê duyệt`,
+              sender_id: newUser._id,
+              receiver_id: assigned_advisor_id,
+              main_class_id: mainClass._id,
+            });
+          } catch (notifError) {
+            console.error(
+              "Không thể tạo thông báo (Google Signup):",
+              notifError
+            );
           }
         }
       } catch (classError) {
         console.error(
-          "Lỗi khi thêm sinh viên vào danh sách chờ duyệt:",
+          "Lỗi khi thêm sinh viên vào danh sách chờ duyệt (Google Signup):",
           classError
         );
-        // Không trả về lỗi, vẫn tạo người dùng
       }
     }
 
-    // Trả về thông tin và token
     const token = generateToken(newUser._id);
 
     return res.status(201).json({

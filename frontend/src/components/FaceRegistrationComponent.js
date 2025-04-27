@@ -58,11 +58,8 @@ const FaceRegistrationComponent = ({
     const initModels = async () => {
       setModelLoadingError(null); // Reset error
       try {
-        console.log("[FaceComponent] Loading models...");
         await loadModels();
         setModelsLoaded(true);
-        console.log("[FaceComponent] Models loaded successfully.");
-        // enqueueSnackbar("Đã tải mô hình nhận diện", { variant: "success", autoHideDuration: 1500 });
       } catch (err) {
         console.error("[FaceComponent] Error loading models:", err);
         setModelLoadingError(
@@ -76,7 +73,6 @@ const FaceRegistrationComponent = ({
 
   // 2. Handle camera state changes
   const handleUserMedia = () => {
-    console.log("[FaceComponent] Camera is ready.");
     setCameraReady(true);
     setCameraError(null); // Clear previous camera error
   };
@@ -161,7 +157,6 @@ const FaceRegistrationComponent = ({
       !modelLoadingError &&
       !cameraError
     ) {
-      console.log("[FaceComponent] Starting landmark detection loop.");
       animationFrameId = requestAnimationFrame(detectionLoop);
     } else {
       // Clear canvas if conditions are not met
@@ -174,7 +169,6 @@ const FaceRegistrationComponent = ({
 
     // Cleanup function
     return () => {
-      console.log("[FaceComponent] Stopping landmark detection loop.");
       if (animationFrameId) {
         cancelAnimationFrame(animationFrameId);
       }
@@ -217,7 +211,6 @@ const FaceRegistrationComponent = ({
       }
 
       // Perform face detection
-      console.log("[FaceComponent] Detecting face in captured image...");
       const detections = await detectFace(imageSrc);
 
       if (!detections || !detections.descriptor) {
@@ -231,7 +224,6 @@ const FaceRegistrationComponent = ({
         setIsProcessing(false); // Allow retry
         return;
       }
-      console.log("[FaceComponent] Face detected successfully.");
 
       // Store image and descriptor
       const newImageData = {
@@ -248,9 +240,6 @@ const FaceRegistrationComponent = ({
 
       // If enough images captured, notify parent immediately
       if (updatedImages.length >= requiredImages) {
-        console.log(
-          `[FaceComponent] Captured ${requiredImages} images. Calling onFaceDataCapture.`
-        );
         onFaceDataCapture(updatedImages); // Pass all captured data
         enqueueSnackbar(`Đã chụp đủ ${requiredImages} ảnh!`, {
           variant: "info",
@@ -268,7 +257,6 @@ const FaceRegistrationComponent = ({
 
   // 5. Reset capture
   const resetCapture = () => {
-    console.log("[FaceComponent] Resetting capture.");
     setCapturedImages([]);
     setCaptureError("");
     // Notify parent that data is cleared (optional, depends on parent needs)

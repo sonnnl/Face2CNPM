@@ -660,7 +660,6 @@ const FacilitiesPage = () => {
           },
         };
 
-        console.log("Dữ liệu cập nhật phòng:", updateData);
         await dispatch(updateRoom(updateData)).unwrap();
         toast.success("Cập nhật phòng học thành công");
       }
@@ -828,8 +827,6 @@ const FacilitiesPage = () => {
   const renderCampusesTab = () => {
     // Đảm bảo hiển thị dữ liệu mới nhất
     const displayedCampuses = campusesData || [];
-
-    console.log("Campuses data:", displayedCampuses); // Debug
 
     return (
       <Box sx={{ mt: 2 }}>

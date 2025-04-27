@@ -23,13 +23,10 @@ const CameraTestPage = () => {
 
   // Kiểm tra hỗ trợ
   useEffect(() => {
-    console.log("CameraTestPage mounted");
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       console.error("MediaDevices API không được hỗ trợ");
       setIsSupported(false);
       setError("Trình duyệt không hỗ trợ API camera");
-    } else {
-      console.log("MediaDevices API được hỗ trợ");
     }
 
     // Liệt kê các thiết bị media
@@ -40,7 +37,6 @@ const CameraTestPage = () => {
           const videoDevices = devices.filter(
             (device) => device.kind === "videoinput"
           );
-          console.log("Danh sách thiết bị camera:", videoDevices);
           setMediaDevices(videoDevices);
         })
         .catch((err) => {
@@ -62,12 +58,10 @@ const CameraTestPage = () => {
   const checkCameraPermission = async () => {
     try {
       const result = await navigator.permissions.query({ name: "camera" });
-      console.log("Trạng thái quyền camera:", result.state);
       setPermissionState(result.state);
 
       // Lắng nghe sự thay đổi trạng thái
       result.onchange = () => {
-        console.log("Quyền camera đã thay đổi:", result.state);
         setPermissionState(result.state);
       };
     } catch (err) {
@@ -80,7 +74,6 @@ const CameraTestPage = () => {
     try {
       setError(null);
       setIsLoading(true);
-      console.log("Đang yêu cầu stream camera...");
 
       const constraints = {
         video: {
@@ -91,16 +84,7 @@ const CameraTestPage = () => {
         audio: false,
       };
 
-      console.log("Constraints yêu cầu:", JSON.stringify(constraints));
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-
-      console.log("Đã nhận được stream camera:", stream.id);
-      console.log(
-        "Stream tracks:",
-        stream
-          .getTracks()
-          .map((t) => ({ id: t.id, kind: t.kind, label: t.label }))
-      );
 
       setCameraStream(stream);
 
@@ -109,26 +93,18 @@ const CameraTestPage = () => {
         videoRef.current.srcObject = stream;
 
         // Thêm event listeners cho video element
-        videoRef.current.onloadedmetadata = () => {
-          console.log("Video metadata đã được load");
-        };
+        videoRef.current.onloadedmetadata = () => {};
 
-        videoRef.current.onloadeddata = () => {
-          console.log("Video data đã được load");
-        };
+        videoRef.current.onloadeddata = () => {};
 
-        videoRef.current.onplay = () => {
-          console.log("Video đã bắt đầu phát");
-        };
+        videoRef.current.onplay = () => {};
 
         videoRef.current.onerror = (e) => {
           console.error("Lỗi video element:", e);
         };
 
         try {
-          console.log("Đang cố gắng phát video...");
           await videoRef.current.play();
-          console.log("Video.play() thành công");
         } catch (playErr) {
           console.error("Lỗi khi phát video:", playErr);
         }
@@ -161,7 +137,6 @@ const CameraTestPage = () => {
 
       // Chuyển đổi canvas thành data URL
       const dataUrl = canvas.toDataURL("image/jpeg");
-      console.log("Đã chụp ảnh, kích thước:", canvas.width, "x", canvas.height);
       setCapturedImage(dataUrl);
     }
   };
@@ -170,7 +145,6 @@ const CameraTestPage = () => {
   const stopCamera = () => {
     if (cameraStream) {
       cameraStream.getTracks().forEach((track) => {
-        console.log("Dừng track camera:", track.id);
         track.stop();
       });
 
@@ -224,7 +198,6 @@ const CameraTestPage = () => {
         audio: false,
       });
 
-      console.log("Đã nhận được stream camera tối thiểu");
       setCameraStream(minimalStream);
 
       // Gắn stream vào video element
@@ -248,8 +221,6 @@ const CameraTestPage = () => {
         videoRef.current.srcObject = minimalStream;
         setIsCameraReady(true);
       }
-
-      console.log("Thử cách thay thế thành công");
     } catch (err) {
       console.error("Lỗi khi thử cách thay thế:", err);
       setError(`Lỗi cách thay thế: ${err.name} - ${err.message}`);

@@ -153,7 +153,7 @@ const TeacherClassesPage = () => {
       });
 
       // Lưu nhật ký để gỡ lỗi
-      console.log("Danh sách lớp học đã tải:", response.data.data);
+      // console.log("Danh sách lớp học đã tải:", response.data.data);
 
       setClasses(response.data.data || []);
       setTotalClasses(response.data.count || 0);

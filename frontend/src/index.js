@@ -11,6 +11,7 @@ import { HelmetProvider } from "react-helmet-async";
 import App from "./App";
 import { store, persistor } from "./redux/store";
 import theme from "./theme";
+import "./index.css";
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(

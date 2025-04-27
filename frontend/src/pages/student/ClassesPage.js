@@ -132,25 +132,11 @@ const StudentClassesPage = () => {
 
   // Effect để fetch lại classes khi debouncedSearchTerm hoặc filter thay đổi
   useEffect(() => {
-    console.log(
-      "Effect running. semester:",
-      semester,
-      "academicYear:",
-      academicYear
-    );
     fetchClasses(debouncedSearchTerm, semester, academicYear);
   }, [debouncedSearchTerm, semester, academicYear]);
 
   // Tải danh sách lớp học sử dụng service
   const fetchClasses = async (currentSearch, currentSemester, currentYear) => {
-    console.log(
-      "fetchClasses called. Search:",
-      currentSearch,
-      "Semester:",
-      currentSemester,
-      "Year:",
-      currentYear
-    );
     try {
       setIsLoading(true);
       const options = {
@@ -207,7 +193,6 @@ const StudentClassesPage = () => {
 
   // Xử lý thay đổi bộ lọc học kỳ
   const handleSemesterChange = (event) => {
-    console.log("handleSemesterChange called. Value:", event.target.value);
     setSemester(event.target.value);
   };
 

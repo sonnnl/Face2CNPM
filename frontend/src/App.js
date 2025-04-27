@@ -18,6 +18,7 @@ import ProfilePage from "./pages/ProfilePage";
 import StudentClassesPage from "./pages/student/ClassesPage";
 import StudentAttendancePage from "./pages/student/AttendancePage";
 import StudentScoresPage from "./pages/student/ScoresPage";
+import StudentTeachersPage from "./pages/student/TeachersPage";
 
 // Teacher Pages
 import TeacherClassesPage from "./pages/teacher/ClassesPage";
@@ -49,14 +50,7 @@ const App = () => {
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
     if (storedToken && !user && token === storedToken) {
-      console.log("[Debug] App.js: Dispatching getCurrentUser on load.");
       dispatch(getCurrentUser());
-    } else {
-      console.log("[Debug] App.js: Not dispatching getCurrentUser on load.", {
-        storedTokenPresent: !!storedToken,
-        userPresent: !!user,
-        tokenMatch: token === storedToken,
-      });
     }
   }, [dispatch, user, token]);
 
@@ -122,6 +116,14 @@ const App = () => {
             element={
               <ProtectedRoute roles={["student"]}>
                 <StudentScoresPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="teachers"
+            element={
+              <ProtectedRoute roles={["student"]}>
+                <StudentTeachersPage />
               </ProtectedRoute>
             }
           />

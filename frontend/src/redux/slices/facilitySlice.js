@@ -41,7 +41,6 @@ export const fetchAllCampuses = createAsyncThunk(
       }
 
       const response = await axiosInstance.get(url);
-      console.log("API response:", response.data);
       return response.data;
     } catch (error) {
       console.error("API error:", error);
@@ -352,7 +351,6 @@ export const updateRoom = createAsyncThunk(
         }));
       }
 
-      console.log("Gửi dữ liệu cập nhật phòng:", formattedData);
       const response = await axiosInstance.put(
         `facilities/rooms/${id}`,
         formattedData
@@ -514,7 +512,6 @@ const facilitySlice = createSlice({
       })
       .addCase(fetchAllCampuses.fulfilled, (state, action) => {
         state.isLoading = false;
-        console.log("fetchAllCampuses.fulfilled", action.payload);
         if (action.payload?.data) {
           state.campuses = action.payload.data;
         } else if (Array.isArray(action.payload)) {

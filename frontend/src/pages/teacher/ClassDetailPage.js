@@ -160,12 +160,12 @@ const TeacherClassDetailPage = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      console.log("Dữ liệu phòng học từ API:", response.data);
+      // console.log("Dữ liệu phòng học từ API:", response.data);
 
       if (response.data.success && Array.isArray(response.data.data)) {
         // Lưu trữ dữ liệu phòng học và ghi log để kiểm tra
         setRooms(response.data.data);
-        console.log("Đã cập nhật state rooms:", response.data.data);
+        // console.log("Đã cập nhật state rooms:", response.data.data);
       } else {
         setRooms([]);
         console.error(
@@ -210,7 +210,7 @@ const TeacherClassDetailPage = () => {
       );
 
       // Log dữ liệu để xem cấu trúc
-      console.log("Dữ liệu lớp học nhận về:", classResponse.data);
+      // console.log("Dữ liệu lớp học nhận về:", classResponse.data);
 
       // Kiểm tra nếu không có dữ liệu trả về
       if (!classResponse.data.success || !classResponse.data.data) {
@@ -269,7 +269,7 @@ const TeacherClassDetailPage = () => {
             }
           );
 
-          console.log("Dữ liệu sinh viên cơ bản:", studentsResponse.data);
+          // console.log("Dữ liệu sinh viên cơ bản:", studentsResponse.data);
 
           // Lưu danh sách sinh viên cơ bản trước
           let studentsWithBasicInfo = [];
@@ -294,10 +294,10 @@ const TeacherClassDetailPage = () => {
                   }
                 );
 
-                console.log(
-                  `Thông tin chi tiết của sinh viên ${student.full_name}:`,
-                  studentDetailResponse.data
-                );
+                // console.log(
+                //   `Thông tin chi tiết của sinh viên ${student.full_name}:`,
+                //   studentDetailResponse.data
+                // );
 
                 if (
                   studentDetailResponse.data.success &&
@@ -313,9 +313,9 @@ const TeacherClassDetailPage = () => {
                     detailedInfo.faceFeatures.descriptors.length > 0
                   );
 
-                  console.log(
-                    `Sinh viên ${detailedInfo.full_name} có dữ liệu khuôn mặt: ${hasFaceData}`
-                  );
+                  // console.log(
+                  //   `Sinh viên ${detailedInfo.full_name} có dữ liệu khuôn mặt: ${hasFaceData}`
+                  // );
 
                   return {
                     ...student,
@@ -615,7 +615,7 @@ const TeacherClassDetailPage = () => {
         }
       );
 
-      console.log("Danh sách lớp chính:", mainClassResponse.data);
+      // console.log("Danh sách lớp chính:", mainClassResponse.data);
 
       if (!mainClassResponse.data?.data) {
         enqueueSnackbar("Không thể tải danh sách lớp chính", {
@@ -662,7 +662,7 @@ const TeacherClassDetailPage = () => {
         }
       );
 
-      console.log("Danh sách sinh viên lớp chính:", studentsResponse.data);
+      // console.log("Danh sách sinh viên lớp chính:", studentsResponse.data);
 
       if (!studentsResponse.data?.data) {
         enqueueSnackbar("Không thể tải danh sách sinh viên từ lớp chính", {
@@ -1531,7 +1531,7 @@ const TeacherClassDetailPage = () => {
                 {students.length > 0 ? (
                   students.map((student, index) => {
                     // Kiểm tra và log mỗi sinh viên để debug
-                    console.log(`Hiển thị sinh viên ${index + 1}:`, student);
+                    // console.log(`Hiển thị sinh viên ${index + 1}:`, student);
 
                     // Kiểm tra có face data từ cả hai nguồn có thể
                     const hasFaceData =
@@ -1619,10 +1619,10 @@ const TeacherClassDetailPage = () => {
                 {attendanceSessions.length > 0 ? (
                   attendanceSessions.map((session, index) => {
                     // Log the session.room before rendering
-                    console.log(
-                      `[DEBUG] Rendering room for session ${session._id}:`,
-                      session.room
-                    );
+                    // console.log(
+                    //   `[DEBUG] Rendering room for session ${session._id}:`,
+                    //   session.room
+                    // );
                     return (
                       <TableRow key={session._id}>
                         <TableCell>{index + 1}</TableCell>

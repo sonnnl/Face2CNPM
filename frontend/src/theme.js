@@ -67,6 +67,19 @@ const theme = createTheme({
     },
   },
   components: {
+    /* MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          backgroundImage: `url("/img/background.jpg")`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundRepeat: "no-repeat",
+          minHeight: "100vh",
+          margin: 0,
+          backgroundColor: "transparent",
+        },
+      },
+    }, */
     MuiButton: {
       styleOverrides: {
         root: {

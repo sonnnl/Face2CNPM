@@ -44,7 +44,6 @@ export const getClassFaceFeatures = createAsyncThunk(
         }
       );
 
-      console.log("[DEBUG] API response from redux slice:", response.data);
       return response.data;
     } catch (error) {
       console.error("[DEBUG] API error in redux slice:", error);
@@ -200,10 +199,6 @@ const faceRecognitionSlice = createSlice({
           );
           state.classStudents = [];
         }
-        console.log(
-          "[DEBUG] classStudents đã được cập nhật:",
-          state.classStudents
-        );
       })
       .addCase(getClassFaceFeatures.rejected, (state, action) => {
         state.isProcessing = false;

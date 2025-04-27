@@ -300,7 +300,7 @@ const AttendancePage = () => {
 
   const handleUserMedia = useCallback(
     (stream) => {
-      console.log("Camera đã được cấp quyền và khởi tạo:", stream.id);
+      // console.log("Camera đã được cấp quyền và khởi tạo:", stream.id);
       dispatch(setFaceRecCameraReady(true));
       setComponentError(null); // Clear camera errors
     },
@@ -657,7 +657,6 @@ const AttendancePage = () => {
         (log) => log.student_id?._id === studentId && log.status === "present"
       );
       if (isAlreadyPresent) {
-        // console.log(`Student ${studentId} already marked present.`);
         return; // Don't mark again if already present
       }
 
