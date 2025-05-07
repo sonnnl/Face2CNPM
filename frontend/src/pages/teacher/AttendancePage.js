@@ -79,10 +79,10 @@ const Webcam = lazy(() => import("react-webcam"));
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
 
 // Configuration Constants
-const RECOGNITION_THRESHOLD = 0.45;
+const RECOGNITION_THRESHOLD = 0.4;
 const DETECTION_THRESHOLD = 0.5;
-const CONFIDENCE_THRESHOLD = 0.6; // Confidence threshold for automatic attendance
-const AUTO_DETECT_INTERVAL = 1500; // Increased interval for potentially better performance
+const CONFIDENCE_THRESHOLD = 0.7;
+const AUTO_DETECT_INTERVAL = 1500;
 const FACE_DETECTION_OPTIONS = new faceapi.TinyFaceDetectorOptions({
   scoreThreshold: DETECTION_THRESHOLD,
   inputSize: 320,

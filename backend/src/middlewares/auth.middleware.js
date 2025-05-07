@@ -29,6 +29,22 @@ exports.protect = async (req, res, next) => {
       next();
     } catch (error) {
       console.error(error);
+
+      // Phân biệt các loại lỗi token
+      if (error.name === "TokenExpiredError") {
+        return res.status(401).json({
+          success: false,
+          message: "Phiên đăng nhập đã hết hạn",
+          errorType: "TOKEN_EXPIRED",
+        });
+      } else if (error.name === "JsonWebTokenError") {
+        return res.status(401).json({
+          success: false,
+          message: "Token không hợp lệ",
+          errorType: "INVALID_TOKEN",
+        });
+      }
+
       return res.status(401).json({
         success: false,
         message: "Không được phép truy cập, token không hợp lệ",

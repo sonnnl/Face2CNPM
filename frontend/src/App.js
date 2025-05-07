@@ -1,7 +1,9 @@
 import React, { useEffect } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
-import { getCurrentUser } from "./redux/slices/authSlice";
+import { getCurrentUser, logout } from "./redux/slices/authSlice";
+import jwtDecode from "jwt-decode";
+import { toast } from "react-hot-toast";
 
 // Pages
 import LoginPage from "./pages/LoginPage";
@@ -43,16 +45,40 @@ import MinimalLayout from "./layouts/MinimalLayout";
 // Auth check
 import ProtectedRoute from "./components/ProtectedRoute";
 
+// Hàm kiểm tra token hết hạn
+const isTokenExpired = (token) => {
+  if (!token) return true;
+
+  try {
+    const decoded = jwtDecode(token);
+    return decoded.exp < Date.now() / 1000;
+  } catch (error) {
+    console.error("Token decode error:", error);
+    return true;
+  }
+};
+
 const App = () => {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { isAuthenticated, user, token } = useSelector((state) => state.auth);
 
+  // Kiểm tra token hết hạn khi ứng dụng khởi động
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
-    if (storedToken && !user && token === storedToken) {
-      dispatch(getCurrentUser());
+
+    if (storedToken) {
+      if (isTokenExpired(storedToken)) {
+        // Token đã hết hạn
+        toast.error("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại");
+        dispatch(logout());
+        navigate("/login");
+      } else if (!user && token === storedToken) {
+        // Token hợp lệ, lấy thông tin người dùng
+        dispatch(getCurrentUser());
+      }
     }
-  }, [dispatch, user, token]);
+  }, [dispatch, user, token, navigate]);
 
   const hasRole = (role) => {
     if (!user) return false;

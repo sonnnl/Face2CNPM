@@ -33,6 +33,22 @@ axiosInstance.interceptors.request.use(
     const token =
       localStorage.getItem("token") || localStorage.getItem("userToken");
 
+    // Kiểm tra token hết hạn trước khi gửi request
+    if (token && isTokenExpired(token)) {
+      // Xóa token và thông báo hết hạn
+      localStorage.removeItem("token");
+      localStorage.removeItem("userToken");
+
+      // Chuyển hướng tới trang đăng nhập nếu không phải đang ở trang đăng nhập
+      if (!window.location.pathname.includes("/login")) {
+        toast.error("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại");
+        window.location.href = "/login";
+      }
+
+      // Không gửi token hết hạn trong request
+      return config;
+    }
+
     // Thêm token vào header nếu có
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -61,11 +77,22 @@ axiosInstance.interceptors.response.use(
       switch (status) {
         case 401:
           // Token hết hạn hoặc không hợp lệ
-          toast.error("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại");
+          if (data?.errorType === "TOKEN_EXPIRED") {
+            // Trường hợp token hết hạn
+            toast.error("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại");
+          } else {
+            // Các lỗi xác thực khác
+            toast.error(data?.message || "Vui lòng đăng nhập lại");
+          }
+
+          // Xóa token và thông tin đăng nhập
           localStorage.removeItem("token");
           localStorage.removeItem("userToken");
-          // Chuyển hướng đến trang đăng nhập nếu cần
-          // window.location.href = '/login';
+
+          // Chuyển hướng đến trang đăng nhập nếu không phải đang ở trang đăng nhập
+          if (!window.location.pathname.includes("/login")) {
+            window.location.href = "/login";
+          }
           break;
         case 403:
           toast.error("Bạn không có quyền thực hiện thao tác này");

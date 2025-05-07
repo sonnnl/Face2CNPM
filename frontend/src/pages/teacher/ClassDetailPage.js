@@ -40,6 +40,8 @@ import {
   Tooltip,
   Checkbox,
   FormHelperText,
+  AlertTitle,
+  ListItemIcon,
 } from "@mui/material";
 import {
   PersonAdd,
@@ -53,14 +55,41 @@ import {
   Info,
   CalendarToday,
   AccessTime,
-  Room,
   Download,
   School,
   Settings,
   Event,
+  Person,
+  Room,
+  Assignment as AssignmentIcon,
 } from "@mui/icons-material";
+import {
+  getTeachingClassById,
+  updateTeachingClass,
+  checkScheduleConflicts,
+} from "../../services/api";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+
+// --- Định nghĩa thời gian tiết học --- (Thêm vào đây)
+const periodTimings = {
+  1: { start: "07:00", end: "07:45" },
+  2: { start: "07:50", end: "08:35" },
+  3: { start: "08:40", end: "09:25" },
+  4: { start: "09:35", end: "10:20" },
+  5: { start: "10:25", end: "11:10" },
+  6: { start: "11:15", end: "12:00" },
+  7: { start: "13:00", end: "13:45" },
+  8: { start: "13:50", end: "14:35" },
+  9: { start: "14:40", end: "15:25" },
+  10: { start: "15:35", end: "16:20" },
+  11: { start: "16:25", end: "17:10" },
+  12: { start: "17:15", end: "18:00" },
+  13: { start: "18:05", end: "18:50" },
+  14: { start: "18:55", end: "19:40" },
+  15: { start: "19:45", end: "20:30" },
+};
+// --- Kết thúc định nghĩa ---
 
 function a11yProps(index) {
   return {
@@ -102,6 +131,7 @@ const TeacherClassDetailPage = () => {
     completed: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   // State cho UI
   const [tabValue, setTabValue] = useState(0);
@@ -112,6 +142,7 @@ const TeacherClassDetailPage = () => {
     start_time: "07:00",
     end_time: "08:40",
     room: "",
+    session_number: attendanceSessions.length + 1,
     start_period: 1,
     end_period: 2,
     notes: "",
@@ -142,6 +173,20 @@ const TeacherClassDetailPage = () => {
 
   // Thêm state để quản lý lịch học
   const [scheduleDays, setScheduleDays] = useState([]);
+
+  // Thêm state để lưu cảnh báo xung đột lịch
+  const [conflictWarnings, setConflictWarnings] = useState([]);
+  const [checkingConflicts, setCheckingConflicts] = useState(false);
+
+  // State cho dialog ghi chú
+  const [openNotesDialog, setOpenNotesDialog] = useState(false);
+  const [currentSessionForNotes, setCurrentSessionForNotes] = useState(null);
+  const [notesText, setNotesText] = useState("");
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
+
+  // State kiểm tra lớp học đã bắt đầu chưa - SẼ ĐƯỢC THAY THẾ
+  // const [isCourseStarted, setIsCourseStarted] = useState(false);
+  const [derivedClassStatus, setDerivedClassStatus] = useState("LOADING"); // Trạng thái mới, tiếng Anh
 
   // Thêm hàm fetch danh sách phòng học
   const fetchRooms = async (buildingId) => {
@@ -221,7 +266,11 @@ const TeacherClassDetailPage = () => {
         return;
       }
 
-      setClassInfo(classResponse.data.data);
+      const fetchedClassInfo = classResponse.data.data;
+      setClassInfo(fetchedClassInfo);
+
+      // Kiểm tra xem khóa học đã bắt đầu chưa - LOGIC CŨ SẼ BỊ XÓA
+      // if (fetchedClassInfo.course_start_date) { ... }
 
       // Fetch rooms right after setting class info to ensure it's done before rendering
       await fetchRooms();
@@ -233,16 +282,22 @@ const TeacherClassDetailPage = () => {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
-      setAttendanceSessions(sessionsResponse.data.data || []);
+      const fetchedSessions = sessionsResponse.data.data || [];
+      setAttendanceSessions(fetchedSessions);
+
+      // Tính toán trạng thái lớp học
+      setDerivedClassStatus(
+        calculateDerivedClassStatus(fetchedClassInfo, fetchedSessions)
+      );
 
       // Tính toán thống kê điểm danh
       const stats = {
-        total: sessionsResponse.data.data?.length || 0,
+        total: fetchedSessions.length,
         pending: 0,
         completed: 0,
       };
 
-      sessionsResponse.data.data?.forEach((session) => {
+      fetchedSessions.forEach((session) => {
         if (session.status === "completed") {
           stats.completed++;
         } else {
@@ -396,6 +451,7 @@ const TeacherClassDetailPage = () => {
       start_time: "07:00",
       end_time: "08:40",
       room: "",
+      session_number: attendanceSessions.length + 1,
       start_period: 1,
       end_period: 2,
       notes: "",
@@ -426,13 +482,14 @@ const TeacherClassDetailPage = () => {
         start_time,
         end_time,
         room,
+        session_number,
         start_period,
         end_period,
         notes,
       } = sessionFormData;
 
       // Kiểm tra dữ liệu
-      if (!date || !start_time || !end_time) {
+      if (!date || !start_time || !end_time || !session_number) {
         enqueueSnackbar("Vui lòng điền đầy đủ thông tin", { variant: "error" });
         return;
       }
@@ -444,6 +501,7 @@ const TeacherClassDetailPage = () => {
         start_time,
         end_time,
         teaching_class_id: id,
+        session_number: parseInt(session_number, 10),
         start_period: parseInt(start_period, 10) || 1,
         end_period: parseInt(end_period, 10) || 2,
         notes,
@@ -493,13 +551,14 @@ const TeacherClassDetailPage = () => {
         start_time,
         end_time,
         room,
+        session_number,
         start_period,
         end_period,
         notes,
       } = sessionFormData;
 
       // Kiểm tra dữ liệu
-      if (!date || !start_time || !end_time) {
+      if (!date || !start_time || !end_time || !session_number) {
         enqueueSnackbar("Vui lòng điền đầy đủ thông tin", { variant: "error" });
         return;
       }
@@ -510,6 +569,7 @@ const TeacherClassDetailPage = () => {
         date,
         start_time,
         end_time,
+        session_number: parseInt(session_number, 10),
         start_period: parseInt(start_period, 10) || 1,
         end_period: parseInt(end_period, 10) || 2,
         notes,
@@ -938,16 +998,17 @@ const TeacherClassDetailPage = () => {
   };
 
   // Mở dialog chỉnh sửa lớp học
-  const handleOpenEditClassDialog = () => {
+  const handleOpenEditClassDialog = async () => {
+    setIsLoading(true); // Bắt đầu loading
     // Chuẩn bị dữ liệu ban đầu cho form
-    setEditClassData({
+    const initialEditData = {
       class_name: classInfo.class_name || "",
       class_code: classInfo.class_code || "",
       subject_id: classInfo.subject_id?._id || "",
       main_class_id: classInfo.main_class_id?._id || "",
       semester_id: classInfo.semester_id?._id || "",
       total_sessions: classInfo.total_sessions || 15,
-      room_id: classInfo.room?._id || "",
+      // room_id: classInfo.room?._id || "", // Sẽ được quản lý trong từng schedule day
       course_start_date: classInfo.course_start_date
         ? classInfo.course_start_date.split("T")[0]
         : "",
@@ -955,18 +1016,80 @@ const TeacherClassDetailPage = () => {
         ? classInfo.course_end_date.split("T")[0]
         : "",
       auto_generate_sessions: classInfo.auto_generate_sessions !== false,
-      schedule: classInfo.schedule || [],
-    });
+      // schedule: classInfo.schedule || [], // Sẽ được xử lý riêng
+    };
+    setEditClassData(initialEditData);
 
-    // Chuẩn bị lịch học từ classInfo
+    // Tải dữ liệu tham chiếu chung (subjects, semesters, mainClasses, campuses)
+    await fetchReferenceDataForEdit(); // Đảm bảo campuses được tải
+
+    // Xử lý scheduleDays (quan trọng)
     if (classInfo.schedule && classInfo.schedule.length > 0) {
-      setScheduleDays(classInfo.schedule);
-    } else {
-      // Nếu không có lịch học, tạo lịch mặc định dựa trên ngày bắt đầu
-      const dayOfWeek = classInfo.course_start_date
-        ? getDayOfWeekFromDate(classInfo.course_start_date.split("T")[0])
-        : 1;
+      const processedScheduleDays = await Promise.all(
+        classInfo.schedule.map(async (item) => {
+          let campusId = "";
+          let buildingId = "";
+          let availableBuildings = [];
+          let availableRooms = [];
 
+          if (item.room_id) {
+            try {
+              const roomDetailRes = await axios.get(
+                `${API_URL}/facilities/rooms/${item.room_id}?populate=building_id.campus_id`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+              if (roomDetailRes.data.success && roomDetailRes.data.data) {
+                const roomData = roomDetailRes.data.data;
+                if (roomData.building_id) {
+                  buildingId = roomData.building_id._id;
+                  if (roomData.building_id.campus_id) {
+                    campusId = roomData.building_id.campus_id._id;
+                    // Fetch buildings for this campus
+                    const buildingsRes = await axios.get(
+                      `${API_URL}/facilities/buildings/campuses/${campusId}`,
+                      { headers: { Authorization: `Bearer ${token}` } }
+                    );
+                    availableBuildings = buildingsRes.data.data || [];
+                  }
+                  // Fetch rooms for this building
+                  const roomsRes = await axios.get(
+                    `${API_URL}/facilities/rooms/building/${buildingId}`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                  );
+                  availableRooms = roomsRes.data.data || [];
+                }
+              }
+            } catch (error) {
+              console.error(
+                `Error fetching details for room ${item.room_id}:`,
+                error
+              );
+            }
+          }
+          return {
+            ...item,
+            day_of_week: item.day_of_week !== undefined ? item.day_of_week : 1,
+            start_period: item.start_period || 1,
+            end_period: item.end_period || 2,
+            start_time: item.start_time || "07:00",
+            end_time: item.end_time || "08:40",
+            room_id: item.room_id || "",
+            is_recurring:
+              item.is_recurring !== undefined ? item.is_recurring : true,
+            specific_dates: item.specific_dates || [],
+            excluded_dates: item.excluded_dates || [],
+            campusId: campusId,
+            buildingId: buildingId,
+            availableBuildings: availableBuildings,
+            availableRooms: availableRooms,
+          };
+        })
+      );
+      setScheduleDays(processedScheduleDays);
+    } else {
+      const dayOfWeek = initialEditData.course_start_date
+        ? getDayOfWeekFromDate(initialEditData.course_start_date)
+        : 1;
       setScheduleDays([
         {
           day_of_week: dayOfWeek,
@@ -974,18 +1097,18 @@ const TeacherClassDetailPage = () => {
           end_period: 2,
           start_time: "07:00",
           end_time: "08:40",
-          room_id: classInfo.room?._id || "",
+          room_id: "",
           is_recurring: true,
           specific_dates: [],
           excluded_dates: [],
+          campusId: "",
+          buildingId: "",
+          availableBuildings: [],
+          availableRooms: [],
         },
       ]);
     }
-
-    // Tải dữ liệu tham chiếu
-    fetchReferenceDataForEdit();
-
-    // Mở dialog
+    setIsLoading(false); // Kết thúc loading
     setOpenEditClassDialog(true);
   };
 
@@ -993,6 +1116,10 @@ const TeacherClassDetailPage = () => {
   const handleCloseEditClassDialog = () => {
     setOpenEditClassDialog(false);
     setEditClassData(null);
+    setScheduleDays([]); // Reset scheduleDays
+    setConflictWarnings([]); // Reset conflictWarnings
+    setSelectedCampus(""); // Reset selected campus/building for the dialog if they were general
+    setSelectedBuilding("");
   };
 
   // Xử lý thay đổi các trường trong form chỉnh sửa
@@ -1027,65 +1154,257 @@ const TeacherClassDetailPage = () => {
     }));
   };
 
-  // Cập nhật thông tin lớp học
-  const handleUpdateClass = async () => {
-    try {
-      setIsSubmittingEdit(true);
+  // Thêm function để kiểm tra xung đột lịch
+  const checkConflicts = async (scheduleToCheck = scheduleDays) => {
+    // Xóa cảnh báo xung đột cũ
+    setConflictWarnings([]);
 
-      // Kiểm tra dữ liệu
+    try {
+      setCheckingConflicts(true);
+
+      // Kiểm tra xem có thông tin đủ để check không
       if (
-        !editClassData.class_name ||
-        !editClassData.class_code ||
-        !editClassData.subject_id ||
-        !editClassData.semester_id
+        !classInfo?.teacher_id?._id ||
+        !scheduleToCheck ||
+        scheduleToCheck.length === 0 ||
+        scheduleToCheck.some((day) => !day.room_id)
       ) {
-        enqueueSnackbar("Vui lòng điền đầy đủ thông tin bắt buộc", {
-          variant: "warning",
-        });
-        setIsSubmittingEdit(false);
         return;
       }
 
-      // Gộp dữ liệu lịch học vào dữ liệu cập nhật
-      const updateData = {
-        ...editClassData,
-        schedule: scheduleDays,
-      };
+      const response = await checkScheduleConflicts({
+        teacher_id: classInfo.teacher_id._id,
+        schedule: scheduleToCheck,
+        class_id: id, // Loại trừ chính lớp này khi kiểm tra
+      });
 
-      // Gọi API cập nhật
-      const response = await axios.put(
-        `${API_URL}/classes/teaching/${id}`,
-        updateData,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      if (response.data.success) {
-        enqueueSnackbar("Cập nhật thông tin lớp học thành công", {
-          variant: "success",
-        });
-        setOpenEditClassDialog(false);
-
-        // Cập nhật thông tin lớp học trong state
-        setClassInfo({
-          ...classInfo,
-          ...response.data.data,
-        });
-
-        // Tải lại dữ liệu lớp học
-        fetchClassData();
-      } else {
-        throw new Error(response.data.message || "Lỗi khi cập nhật lớp học");
+      if (response.data.has_conflicts) {
+        setConflictWarnings(response.data.conflicts);
       }
     } catch (error) {
-      console.error("Lỗi khi cập nhật thông tin lớp học:", error);
+      console.error("Lỗi khi kiểm tra xung đột lịch học:", error);
+      enqueueSnackbar("Lỗi khi kiểm tra xung đột lịch học", {
+        variant: "error",
+      });
+    } finally {
+      setCheckingConflicts(false);
+    }
+  };
+
+  // Cập nhật hàm handleScheduleChange để check xung đột
+  const handleScheduleChange = async (index, field, value) => {
+    const updatedSchedule = [...scheduleDays];
+    const currentScheduleItem = { ...updatedSchedule[index] };
+
+    currentScheduleItem[field] = value;
+
+    if (field === "campusId") {
+      currentScheduleItem.buildingId = "";
+      currentScheduleItem.room_id = "";
+      currentScheduleItem.availableBuildings = [];
+      currentScheduleItem.availableRooms = [];
+      if (value && value !== "undefined") {
+        // Kiểm tra value !== "undefined"
+        try {
+          const response = await axios.get(
+            `${API_URL}/facilities/buildings/campuses/${value}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          currentScheduleItem.availableBuildings = response.data.data || [];
+        } catch (error) {
+          console.error("Lỗi khi tải tòa nhà cho lịch học:", error);
+          enqueueSnackbar("Lỗi khi tải tòa nhà", { variant: "error" });
+        }
+      }
+    } else if (field === "buildingId") {
+      currentScheduleItem.room_id = "";
+      currentScheduleItem.availableRooms = [];
+      if (value && value !== "undefined") {
+        // Kiểm tra value !== "undefined"
+        try {
+          const response = await axios.get(
+            `${API_URL}/facilities/rooms/building/${value}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          currentScheduleItem.availableRooms = response.data.data || [];
+        } catch (error) {
+          console.error("Lỗi khi tải phòng học cho lịch học:", error);
+          enqueueSnackbar("Lỗi khi tải phòng học", { variant: "error" });
+        }
+      }
+    } else if (field === "start_period" || field === "end_period") {
+      const intValue = parseInt(value, 10);
+      if (isNaN(intValue)) return; // Bỏ qua nếu không phải là số
+
+      if (field === "start_period") {
+        currentScheduleItem.start_period = intValue;
+        currentScheduleItem.start_time = periodTimings[intValue]?.start || "";
+        // Tự động điều chỉnh tiết kết thúc nếu tiết bắt đầu > tiết kết thúc
+        if (
+          currentScheduleItem.end_period &&
+          intValue > currentScheduleItem.end_period
+        ) {
+          currentScheduleItem.end_period = intValue; // Hoặc intValue + 1 tùy theo logic mong muốn
+          currentScheduleItem.end_time =
+            periodTimings[currentScheduleItem.end_period]?.end || "";
+        }
+      } else if (field === "end_period") {
+        // Đảm bảo tiết kết thúc không nhỏ hơn tiết bắt đầu
+        if (
+          currentScheduleItem.start_period &&
+          intValue < currentScheduleItem.start_period
+        ) {
+          currentScheduleItem.end_period = currentScheduleItem.start_period;
+        } else {
+          currentScheduleItem.end_period = intValue;
+        }
+        currentScheduleItem.end_time =
+          periodTimings[currentScheduleItem.end_period]?.end || "";
+      }
+    }
+
+    updatedSchedule[index] = currentScheduleItem;
+    setScheduleDays(updatedSchedule);
+
+    // Tính lại ngày kết thúc khi lịch học thay đổi
+    setEditClassData((prev) => ({
+      ...prev,
+      course_end_date: calculateEndDate(
+        prev.course_start_date,
+        updatedSchedule,
+        prev.total_sessions
+      ),
+    }));
+
+    // Kiểm tra xung đột nếu thay đổi phòng học hoặc thời gian
+    if (
+      field === "room_id" ||
+      field === "day_of_week" ||
+      field === "start_period" ||
+      field === "end_period" ||
+      field === "start_time" ||
+      field === "end_time"
+    ) {
+      setTimeout(() => {
+        if (
+          updatedSchedule[index].room_id &&
+          updatedSchedule[index].day_of_week !== undefined
+        ) {
+          checkConflicts(updatedSchedule);
+        }
+      }, 500);
+    }
+  };
+
+  // Cập nhật hàm handleUpdateClass
+  const handleUpdateClass = async () => {
+    if (!editClassData.class_name || !editClassData.class_code) {
+      enqueueSnackbar("Vui lòng điền đầy đủ thông tin bắt buộc", {
+        variant: "warning",
+      });
+      return;
+    }
+
+    // Kiểm tra room_id trong từng schedule item
+    for (const day of scheduleDays) {
+      if (!day.room_id) {
+        enqueueSnackbar(
+          `Vui lòng chọn phòng học cho buổi học vào ${getDayOfWeekName(
+            day.day_of_week
+          )}`,
+          { variant: "warning" }
+        );
+        return;
+      }
+    }
+
+    setIsUpdating(true); // Bắt đầu quá trình cập nhật chung
+    setCheckingConflicts(true); // Bắt đầu kiểm tra xung đột
+
+    try {
+      const response = await checkScheduleConflicts({
+        teacher_id: classInfo.teacher_id._id,
+        schedule: scheduleDays,
+        class_id: id,
+      });
+
+      setCheckingConflicts(false); // Kết thúc kiểm tra xung đột
+
+      if (response.data.has_conflicts) {
+        setConflictWarnings(response.data.conflicts);
+        if (
+          window.confirm(
+            "Phát hiện xung đột lịch học. Bạn vẫn muốn cập nhật lịch học này không?\n\n" +
+              response.data.conflicts.map((c) => c.message).join("\n")
+          )
+        ) {
+          await updateClassData(); // Người dùng xác nhận, tiến hành cập nhật
+        } else {
+          setIsUpdating(false); // Người dùng hủy, dừng quá trình cập nhật chung
+        }
+      } else {
+        setConflictWarnings([]); // Không có xung đột, xóa cảnh báo cũ (nếu có)
+        await updateClassData(); // Không có xung đột, tiến hành cập nhật
+      }
+    } catch (error) {
+      setCheckingConflicts(false); // Kết thúc kiểm tra xung đột (nếu có lỗi)
+      setIsUpdating(false); // Dừng quá trình cập nhật chung (nếu có lỗi)
+      console.error("Lỗi khi kiểm tra xung đột lịch học:", error);
       enqueueSnackbar(
-        error.response?.data?.message || "Lỗi khi cập nhật thông tin lớp học",
+        "Lỗi khi kiểm tra xung đột lịch học. Vẫn thử cập nhật...",
+        { variant: "warning" }
+      );
+      // Cân nhắc có nên cho phép cập nhật khi kiểm tra xung đột lỗi không
+      // Hiện tại: vẫn thử cập nhật
+      await updateClassData();
+    }
+    // setIsUpdating(false) sẽ được gọi bên trong updateClassData hoặc ở trên nếu hủy
+  };
+
+  // Tách logic cập nhật lớp thành hàm riêng
+  const updateClassData = async () => {
+    // setIsUpdating(true); // Đã set ở handleUpdateClass
+    try {
+      const updateDataPayload = {
+        ...editClassData,
+        schedule: scheduleDays.map((day) => ({
+          // Chỉ gửi các trường cần thiết cho schedule
+          day_of_week: day.day_of_week,
+          start_period: day.start_period,
+          end_period: day.end_period,
+          start_time: day.start_time,
+          end_time: day.end_time,
+          room_id: day.room_id,
+          is_recurring: day.is_recurring,
+          specific_dates: day.specific_dates,
+          excluded_dates: day.excluded_dates,
+        })),
+      };
+
+      // Xóa các trường không cần thiết khỏi payload chính
+      delete updateDataPayload.teacher_id; // Không cho phép thay đổi teacher_id ở đây
+      // delete updateDataPayload.createdAt;
+      // delete updateDataPayload.updatedAt;
+      // ... các trường khác không thuộc TeachingClassSchema hoặc không cho phép sửa
+
+      await updateTeachingClass(id, updateDataPayload);
+
+      enqueueSnackbar("Cập nhật lớp học thành công", {
+        variant: "success",
+      });
+      // setEditClassData(null); // Sẽ được reset bởi handleClose
+      // fetchClassData(); // Tải lại dữ liệu lớp học
+      // setConflictWarnings([]); // Sẽ được reset bởi handleClose
+      handleCloseEditClassDialog(); // Đóng dialog và reset states
+      fetchClassData(); // Tải lại dữ liệu sau khi dialog đã đóng
+    } catch (error) {
+      console.error("Lỗi khi cập nhật lớp học:", error);
+      enqueueSnackbar(
+        error.response?.data?.message || "Lỗi khi cập nhật lớp học",
         { variant: "error" }
       );
     } finally {
-      setIsSubmittingEdit(false);
+      setIsUpdating(false); // Kết thúc quá trình cập nhật chung
     }
   };
 
@@ -1095,9 +1414,9 @@ const TeacherClassDetailPage = () => {
 
     const date = new Date(dateString);
     // getDay() trả về 0 cho Chủ Nhật, 1-6 cho Thứ 2 đến Thứ 7
-    const day = date.getDay();
+    const day = date.getDay(); // Chủ nhật - 0, Thứ hai - 1, ... , Thứ bảy - 6
 
-    // Chuyển đổi để 0 = Chủ Nhật, 1 = Thứ Hai, ...
+    // Không cần chuyển đổi nữa nếu backend/logic khác cũng dùng 0-6
     return day;
   };
 
@@ -1117,47 +1436,31 @@ const TeacherClassDetailPage = () => {
 
   // Thêm lịch học
   const addScheduleDay = () => {
-    // Lấy ngày bắt đầu
     const startDate = editClassData.course_start_date;
-    if (!startDate) {
-      enqueueSnackbar("Vui lòng chọn ngày bắt đầu trước", {
-        variant: "warning",
-      });
-      return;
-    }
-
-    // Lấy thứ từ ngày bắt đầu
-    const baseDayOfWeek = getDayOfWeekFromDate(startDate);
-
-    // Tìm thứ tiếp theo chưa có trong lịch
-    const existingDays = scheduleDays.map((day) => day.day_of_week);
-    let nextDay = (baseDayOfWeek + 1) % 7; // Thứ tiếp theo
-
-    // Tìm một thứ chưa có trong lịch hiện tại
-    for (let i = 0; i < 7; i++) {
-      if (!existingDays.includes(nextDay)) {
-        break;
-      }
-      nextDay = (nextDay + 1) % 7;
-    }
-
-    // Nếu đã có đủ 7 ngày trong tuần, thì dùng thứ 2
-    if (existingDays.length >= 7) {
-      nextDay = 1;
-    }
+    // ... (logic tìm nextDay có thể giữ nguyên hoặc cải thiện)
+    const lastScheduleItem = scheduleDays[scheduleDays.length - 1] || {};
 
     const updatedSchedule = [
       ...scheduleDays,
       {
-        day_of_week: nextDay,
+        day_of_week:
+          lastScheduleItem.day_of_week !== undefined
+            ? lastScheduleItem.day_of_week
+            : startDate
+            ? getDayOfWeekFromDate(startDate)
+            : 1,
         start_period: 1,
         end_period: 2,
-        start_time: "07:00",
-        end_time: "08:40",
-        room_id: editClassData.room_id,
+        start_time: "07:00", // Cần có periodTimings để lấy chính xác
+        end_time: "08:40", // Cần có periodTimings để lấy chính xác
+        room_id: "", // Để trống ban đầu
         is_recurring: true,
         specific_dates: [],
         excluded_dates: [],
+        campusId: lastScheduleItem.campusId || "", // Kế thừa từ buổi cuối hoặc để trống
+        buildingId: lastScheduleItem.buildingId || "",
+        availableBuildings: lastScheduleItem.availableBuildings || [],
+        availableRooms: lastScheduleItem.availableRooms || [],
       },
     ];
 
@@ -1253,26 +1556,6 @@ const TeacherClassDetailPage = () => {
     }
   };
 
-  // Xử lý thay đổi lịch học
-  const handleScheduleChange = (index, field, value) => {
-    const updatedSchedule = [...scheduleDays];
-    updatedSchedule[index] = {
-      ...updatedSchedule[index],
-      [field]: value,
-    };
-    setScheduleDays(updatedSchedule);
-
-    // Tính lại ngày kết thúc khi lịch học thay đổi
-    setEditClassData((prev) => ({
-      ...prev,
-      course_end_date: calculateEndDate(
-        prev.course_start_date,
-        updatedSchedule,
-        prev.total_sessions
-      ),
-    }));
-  };
-
   // Xử lý thay đổi ngày bắt đầu
   const handleStartDateChange = (e) => {
     const startDate = e.target.value;
@@ -1326,1150 +1609,1746 @@ const TeacherClassDetailPage = () => {
     }));
   };
 
-  if (isLoading) {
-    return (
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          height: "80vh",
-        }}
-      >
-        <CircularProgress />
-      </Box>
-    );
-  }
+  // Thêm phần render cảnh báo xung đột lịch
+  const renderConflictWarnings = () => {
+    if (conflictWarnings.length === 0) {
+      return null;
+    }
 
-  if (!classInfo) {
     return (
-      <Box sx={{ py: 3 }}>
-        <Card sx={{ textAlign: "center", p: 4 }}>
-          <Typography variant="h5" color="error" gutterBottom>
-            Không tìm thấy lớp học
-          </Typography>
-          <Typography variant="body1" sx={{ mb: 3 }}>
-            Lớp học bạn đang tìm kiếm không tồn tại hoặc đã bị xóa.
-          </Typography>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={() => navigate("/teacher/classes")}
-          >
-            Quay lại danh sách lớp
-          </Button>
-        </Card>
-      </Box>
+      <Alert severity="warning" sx={{ mt: 2, mb: 2 }}>
+        <AlertTitle>Phát hiện xung đột lịch học</AlertTitle>
+        <List dense>
+          {conflictWarnings.map((conflict, index) => (
+            <ListItem key={index}>
+              <ListItemIcon>
+                {conflict.type === "teacher" ? (
+                  <Person color="error" />
+                ) : (
+                  <Room color="error" />
+                )}
+              </ListItemIcon>
+              <ListItemText primary={conflict.message} />
+            </ListItem>
+          ))}
+        </List>
+      </Alert>
     );
-  }
+  };
+
+  // Hàm mở dialog ghi chú
+  const handleOpenNotesDialog = (session) => {
+    setCurrentSessionForNotes(session);
+    setNotesText(session.notes || "");
+    setOpenNotesDialog(true);
+  };
+
+  // Hàm đóng dialog ghi chú
+  const handleCloseNotesDialog = () => {
+    setOpenNotesDialog(false);
+    setCurrentSessionForNotes(null);
+    setNotesText("");
+  };
+
+  // Hàm lưu ghi chú
+  const handleSaveNotes = async () => {
+    if (!currentSessionForNotes) return;
+    setIsSavingNotes(true);
+    try {
+      // Giả sử API cho phép cập nhật một phần hoặc toàn bộ session
+      // Nếu chỉ cập nhật notes, body request có thể chỉ cần { notes: notesText }
+      // Endpoint này cần được backend hỗ trợ đúng cách
+      await axios.put(
+        `${API_URL}/attendance/sessions/${currentSessionForNotes._id}`,
+        { ...currentSessionForNotes, notes: notesText }, // Gửi lại session với notes đã cập nhật
+        // Hoặc chỉ: { notes: notesText } nếu API hỗ trợ partial update tốt
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      enqueueSnackbar("Cập nhật ghi chú thành công", { variant: "success" });
+      setAttendanceSessions((prevSessions) =>
+        prevSessions.map((s) =>
+          s._id === currentSessionForNotes._id ? { ...s, notes: notesText } : s
+        )
+      );
+      handleCloseNotesDialog();
+    } catch (error) {
+      console.error("Lỗi khi cập nhật ghi chú:", error);
+      enqueueSnackbar(
+        error.response?.data?.message || "Lỗi khi cập nhật ghi chú",
+        { variant: "error" }
+      );
+    } finally {
+      setIsSavingNotes(false);
+    }
+  };
+
+  // Helper function để lấy thông tin chi tiết phòng học
+  const getRoomDetailsString = (roomId) => {
+    if (!roomId) return "Chưa xác định";
+    // Đảm bảo rooms là một mảng trước khi sử dụng find
+    if (!Array.isArray(rooms)) return "Đang tải phòng...";
+
+    const roomDetail = rooms.find((r) => r._id === roomId);
+    if (!roomDetail) return "Không tìm thấy phòng";
+
+    const buildingName = roomDetail.building_id?.name || "N/A";
+    const campusName = roomDetail.building_id?.campus_id?.name || "N/A";
+    return `${roomDetail.room_number} (${buildingName} - ${campusName})`;
+  };
+
+  // Hàm tính toán trạng thái lớp học dựa trên dữ liệu hiện có
+  const calculateDerivedClassStatus = useCallback((classData, sessions) => {
+    if (!classData) return "LOADING";
+
+    const totalPlannedSessions = classData.total_sessions || 0;
+    const actualSessions = sessions || [];
+
+    if (totalPlannedSessions === 0 && actualSessions.length === 0) {
+      return "NOT_STARTED";
+    }
+
+    const completedSessionCount = actualSessions.filter(
+      (s) => s.status === "completed"
+    ).length;
+
+    if (
+      totalPlannedSessions > 0 &&
+      completedSessionCount === totalPlannedSessions
+    ) {
+      return "COMPLETED";
+    }
+
+    const anySessionTaken = actualSessions.some(
+      (s) => s.status === "active" || s.status === "completed"
+    );
+
+    if (anySessionTaken) {
+      return "IN_PROGRESS";
+    }
+
+    return "NOT_STARTED";
+  }, []);
+
+  // Hàm chuyển đổi trạng thái tiếng Anh sang tiếng Việt để hiển thị
+  const getVietnameseClassStatus = (status) => {
+    switch (status) {
+      case "LOADING":
+        return "Đang tải...";
+      case "NOT_STARTED":
+        return "Chưa bắt đầu";
+      case "IN_PROGRESS":
+        return "Đang học";
+      case "COMPLETED":
+        return "Đã kết thúc";
+      default:
+        return status; // Trả về chính nó nếu không khớp
+    }
+  };
 
   return (
-    <Box sx={{ padding: 3 }}>
-      <Box sx={{ mb: 3 }}>
-        <Button
-          variant="outlined"
-          onClick={() => navigate("/teacher/classes")}
-          sx={{ mb: 2 }}
-        >
-          Quay lại danh sách lớp
-        </Button>
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-          }}
-        >
-          <Box>
-            <Typography variant="h4" gutterBottom>
-              {classInfo.class_name}
-            </Typography>
-            <Typography variant="subtitle1" color="text.secondary" gutterBottom>
-              {classInfo.subject_id?.name} ({classInfo.subject_id?.code})
-            </Typography>
-          </Box>
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={<Edit />}
-            onClick={handleOpenEditClassDialog}
-          >
-            Chỉnh sửa thông tin lớp
-          </Button>
+    <Box sx={{ p: 3, bgcolor: "grey.50", minHeight: "100vh" }}>
+      {isLoading ? (
+        <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}>
+          <CircularProgress />
         </Box>
-      </Box>
+      ) : (
+        <>
+          <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
+            <Typography variant="h4" gutterBottom sx={{ fontWeight: "bold" }}>
+              <School sx={{ mr: 1, verticalAlign: "middle" }} />
+              {classInfo?.class_name || "Chi tiết lớp học"}
+            </Typography>
+            <Box>
+              {/* NÚT CHỈNH SỬA LỚP HỌC Ở GÓC TRÊN - XÓA
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={() => setEditMode(true)}
+                disabled={isLoading} // editMode đã bị xóa
+                startIcon={<Edit />}
+                sx={{ mr: 1 }}
+              >
+                Chỉnh sửa lớp học
+              </Button>
+              */}
+            </Box>
+          </Box>
 
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Thông tin lớp học
-              </Typography>
-              <Box sx={{ mt: 2 }}>
+          {/* Hiển thị thông tin cơ bản về lớp học */}
+          <Paper
+            sx={{ p: 3, mb: 3, borderRadius: 2, boxShadow: 3 }}
+            elevation={3}
+          >
+            <Grid container spacing={3}>
+              <Grid item xs={12} sm={6} md={3}>
                 <Typography
-                  variant="body2"
-                  sx={{ mb: 1, display: "flex", alignItems: "center" }}
+                  variant="subtitle2"
+                  sx={{ color: "text.secondary", mb: 1 }}
                 >
-                  <CalendarToday sx={{ mr: 1, fontSize: "small" }} />
-                  Học kỳ: {classInfo.semester_id?.name || "N/A"}
+                  Mã lớp
                 </Typography>
+                <Typography variant="body1" sx={{ fontWeight: "medium" }}>
+                  {classInfo?.class_code || "Không có"}
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
                 <Typography
-                  variant="body2"
-                  sx={{ mb: 1, display: "flex", alignItems: "center" }}
+                  variant="subtitle2"
+                  sx={{ color: "text.secondary", mb: 1 }}
                 >
-                  <CalendarToday sx={{ mr: 1, fontSize: "small" }} />
-                  Ngày bắt đầu:{" "}
-                  {classInfo.course_start_date
+                  Môn học
+                </Typography>
+                <Typography variant="body1" sx={{ fontWeight: "medium" }}>
+                  {classInfo?.subject_id?.name || "Không xác định"}
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Typography
+                  variant="subtitle2"
+                  sx={{ color: "text.secondary", mb: 1 }}
+                >
+                  Kỳ học
+                </Typography>
+                <Chip
+                  label={
+                    classInfo?.semester_id?.name
+                      ? `${classInfo.semester_id.name} (${
+                          classInfo.semester_id.academic_year ||
+                          classInfo.semester_id.year
+                        })`
+                      : "Không xác định"
+                  }
+                  color="primary"
+                  variant="outlined"
+                  size="small"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Typography
+                  variant="subtitle2"
+                  sx={{ color: "text.secondary", mb: 1 }}
+                >
+                  Lớp chính
+                </Typography>
+                <Chip
+                  label={
+                    classInfo?.main_class_id?.name ||
+                    "Không thuộc lớp chính nào"
+                  }
+                  color="info"
+                  variant={classInfo?.main_class_id ? "filled" : "outlined"}
+                  size="small"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Typography
+                  variant="subtitle2"
+                  sx={{ color: "text.secondary", mb: 1 }}
+                >
+                  Giảng viên
+                </Typography>
+                <Typography variant="body1" sx={{ fontWeight: "medium" }}>
+                  {classInfo?.teacher_id?.full_name || "Không xác định"}
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Typography
+                  variant="subtitle2"
+                  sx={{ color: "text.secondary", mb: 1 }}
+                >
+                  Ngày bắt đầu - Kết thúc
+                </Typography>
+                <Typography variant="body1" sx={{ fontWeight: "medium" }}>
+                  {classInfo?.course_start_date
                     ? new Date(classInfo.course_start_date).toLocaleDateString(
                         "vi-VN"
                       )
-                    : "N/A"}
-                </Typography>
-                <Typography
-                  variant="body2"
-                  sx={{ mb: 1, display: "flex", alignItems: "center" }}
-                >
-                  <CalendarToday sx={{ mr: 1, fontSize: "small" }} />
-                  Ngày kết thúc:{" "}
-                  {classInfo.course_end_date
+                    : "N/A"}{" "}
+                  -{" "}
+                  {classInfo?.course_end_date
                     ? new Date(classInfo.course_end_date).toLocaleDateString(
                         "vi-VN"
                       )
                     : "N/A"}
                 </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
                 <Typography
-                  variant="body2"
-                  sx={{ mb: 1, display: "flex", alignItems: "center" }}
+                  variant="subtitle2"
+                  sx={{ color: "text.secondary", mb: 1 }}
                 >
-                  <Info sx={{ mr: 1, fontSize: "small" }} />
-                  Số buổi học: {classInfo.total_sessions || 15}
+                  Số buổi học
                 </Typography>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Điểm danh
-              </Typography>
-              <Box sx={{ mt: 2 }}>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  Tổng số buổi: {attendanceStats.total}
+                <Typography variant="body1" sx={{ fontWeight: "medium" }}>
+                  {classInfo?.total_sessions || 0}
                 </Typography>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  Đã hoàn thành: {attendanceStats.completed}
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Typography
+                  variant="subtitle2"
+                  sx={{ color: "text.secondary", mb: 1 }}
+                >
+                  Số lượng sinh viên
                 </Typography>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  Chưa hoàn thành: {attendanceStats.pending}
+                <Typography variant="body1" sx={{ fontWeight: "medium" }}>
+                  {Array.isArray(classInfo?.students)
+                    ? classInfo.students.length
+                    : 0}
                 </Typography>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Sinh viên
-              </Typography>
-              <Box sx={{ mt: 2 }}>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  Tổng số sinh viên: {students.length}
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Typography
+                  variant="subtitle2"
+                  sx={{ color: "text.secondary", mb: 1 }}
+                >
+                  Trạng thái lớp học
                 </Typography>
-              </Box>
+                <Chip
+                  label={
+                    getVietnameseClassStatus(derivedClassStatus) ||
+                    "Đang tải..."
+                  }
+                  color={
+                    derivedClassStatus === "IN_PROGRESS"
+                      ? "warning"
+                      : derivedClassStatus === "COMPLETED"
+                      ? "success"
+                      : derivedClassStatus === "NOT_STARTED"
+                      ? "info"
+                      : "default"
+                  }
+                  variant="outlined"
+                  size="small"
+                />
+              </Grid>
+            </Grid>
+          </Paper>
+
+          {/* Hiển thị cảnh báo xung đột lịch nếu đang trong chế độ chỉnh sửa - XÓA PHẦN NÀY VÌ editMode BỊ XÓA */}
+          {/* {editMode && renderConflictWarnings()} */}
+
+          {/* Các nút hành động khi chỉnh sửa - XÓA KHỐI NÀY VÌ editMode BỊ XÓA */}
+          {/*
+          {editMode && (
+            <Box
+              sx={{
+                mt: 3,
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 2,
+              }}
+            >
               <Button
                 variant="outlined"
-                size="small"
-                startIcon={<Download />}
-                onClick={handleExportStudentList}
-                sx={{ mt: 2 }}
+                onClick={() => {
+                  // setEditMode(false); // Sẽ bị lỗi nếu editMode bị xóa
+                  setEditClassData({ ...classInfo });
+                  setScheduleDays(
+                    classInfo.schedule?.map((item) => ({ ...item })) || []
+                  );
+                  setConflictWarnings([]); 
+                }}
+                disabled={isUpdating || checkingConflicts}
               >
-                Xuất danh sách
+                Hủy
               </Button>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+              <Button
+                variant="contained"
+                onClick={handleUpdateClass}
+                disabled={isUpdating || checkingConflicts}
+                startIcon={
+                  isUpdating || checkingConflicts ? (
+                    <CircularProgress size={20} />
+                  ) : null
+                }
+              >
+                {isUpdating
+                  ? "Đang cập nhật..."
+                  : checkingConflicts
+                  ? "Đang kiểm tra..."
+                  : "Lưu thay đổi"}
+              </Button>
+            </Box>
+          )}
+          */}
 
-      <Box sx={{ width: "100%" }}>
-        <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-          <Tabs
-            value={tabValue}
-            onChange={handleChangeTab}
-            aria-label="lớp học tabs"
-          >
-            <Tab label="Sinh viên" {...a11yProps(0)} />
-            <Tab label="Phiên điểm danh" {...a11yProps(1)} />
-          </Tabs>
-        </Box>
-        <TabPanel value={tabValue} index={0}>
-          <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 2 }}>
-            <Button
-              variant="contained"
-              startIcon={<PersonAdd />}
-              onClick={handleOpenAddStudentDialog}
-            >
-              Thêm sinh viên
-            </Button>
-          </Box>
-          <TableContainer component={Paper}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>STT</TableCell>
-                  <TableCell>Mã sinh viên</TableCell>
-                  <TableCell>Họ và tên</TableCell>
-                  <TableCell>Email</TableCell>
-                  <TableCell>Trạng thái</TableCell>
-                  <TableCell>Thao tác</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {students.length > 0 ? (
-                  students.map((student, index) => {
-                    // Kiểm tra và log mỗi sinh viên để debug
-                    // console.log(`Hiển thị sinh viên ${index + 1}:`, student);
-
-                    // Kiểm tra có face data từ cả hai nguồn có thể
-                    const hasFaceData =
-                      student.has_face_data ||
-                      !!(
-                        student.faceFeatures &&
-                        student.faceFeatures.descriptors &&
-                        student.faceFeatures.descriptors.length > 0
-                      );
-
-                    return (
-                      <TableRow key={student._id}>
-                        <TableCell>{index + 1}</TableCell>
-                        <TableCell>
-                          {student.school_info?.student_id || "N/A"}
-                        </TableCell>
-                        <TableCell>
-                          {student.full_name || student.name}
-                        </TableCell>
-                        <TableCell>{student.email}</TableCell>
-                        <TableCell>
-                          {hasFaceData ? (
-                            <Chip
-                              label="Đã đăng ký khuôn mặt"
-                              color="success"
-                              size="small"
-                            />
-                          ) : (
-                            <Chip
-                              label="Chưa đăng ký khuôn mặt"
-                              color="warning"
-                              size="small"
-                            />
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Tooltip title="Xóa khỏi lớp">
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => handleRemoveStudent(student._id)}
-                            >
-                              <Delete />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={6} align="center">
-                      Chưa có sinh viên nào trong lớp
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </TabPanel>
-        <TabPanel value={tabValue} index={1}>
-          <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 2 }}>
-            <Button
-              variant="contained"
-              startIcon={<Add />}
-              onClick={handleOpenSessionDialog}
-            >
-              Tạo phiên điểm danh
-            </Button>
-          </Box>
-          <TableContainer component={Paper}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>STT</TableCell>
-                  <TableCell>Ngày</TableCell>
-                  <TableCell>Tiết/Thời gian</TableCell>
-                  <TableCell>Phòng</TableCell>
-                  <TableCell>Ghi chú</TableCell>
-                  <TableCell>Trạng thái</TableCell>
-                  <TableCell>Thao tác</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {attendanceSessions.length > 0 ? (
-                  attendanceSessions.map((session, index) => {
-                    // Log the session.room before rendering
-                    // console.log(
-                    //   `[DEBUG] Rendering room for session ${session._id}:`,
-                    //   session.room
-                    // );
-                    return (
-                      <TableRow key={session._id}>
-                        <TableCell>{index + 1}</TableCell>
-                        <TableCell>
-                          {new Date(session.date).toLocaleString("vi-VN", {
-                            weekday: "long",
-                            year: "numeric",
-                            month: "numeric",
-                            day: "numeric",
-                          })}
-                        </TableCell>
-                        <TableCell>
-                          {session.start_period && session.end_period ? (
-                            <Box>
-                              <Typography variant="body2">
-                                Tiết {session.start_period}-{session.end_period}
-                              </Typography>
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                              >
-                                {(() => {
-                                  // Hiển thị thời gian bắt đầu từ API
-                                  const startTime = session.start_time
-                                    ? new Date(
-                                        session.start_time
-                                      ).toLocaleTimeString("vi-VN", {
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                      })
-                                    : "N/A";
-
-                                  // Tính thời gian kết thúc dự kiến dựa trên lịch học, không phải thời gian kết thúc thực tế
-                                  // Mỗi tiết thường kéo dài 50 phút
-                                  let endTimeDate;
-                                  if (session.start_time) {
-                                    // Tính thời gian kết thúc dự kiến dựa trên số tiết
-                                    const tietsCount =
-                                      session.end_period -
-                                      session.start_period +
-                                      1;
-                                    endTimeDate = new Date(session.start_time);
-                                    endTimeDate.setMinutes(
-                                      endTimeDate.getMinutes() + tietsCount * 50
-                                    );
-                                  }
-
-                                  const endTime = endTimeDate
-                                    ? endTimeDate.toLocaleTimeString("vi-VN", {
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                      })
-                                    : "N/A";
-
-                                  return `${startTime} - ${endTime}`;
-                                })()}
-                              </Typography>
-                            </Box>
-                          ) : session.start_time ? (
-                            (() => {
-                              // Hiển thị thời gian bắt đầu từ API
-                              const startTime = new Date(
-                                session.start_time
-                              ).toLocaleTimeString("vi-VN", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              });
-
-                              // Mặc định coi mỗi buổi học kéo dài 4 tiết (200 phút) nếu không có thông tin tiết
-                              const endTimeDate = new Date(session.start_time);
-                              endTimeDate.setMinutes(
-                                endTimeDate.getMinutes() + 200
-                              );
-                              const endTime = endTimeDate.toLocaleTimeString(
-                                "vi-VN",
-                                { hour: "2-digit", minute: "2-digit" }
-                              );
-
-                              return `${startTime} - ${endTime}`;
-                            })()
-                          ) : (
-                            "N/A"
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {session.room ? (
-                            <Tooltip title="Thông tin phòng học">
-                              <Typography variant="body2">
-                                {session.room.room_number || "Không xác định"} -{" "}
-                                {session.room.building_id?.name ||
-                                  "Không xác định"}{" "}
-                                -{" "}
-                                {session.room.building_id?.campus_id?.name ||
-                                  "Không xác định"}
-                              </Typography>
-                            </Tooltip>
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              Không có phòng
-                            </Typography>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {session.notes ? (
-                            <Tooltip title={session.notes}>
-                              <Typography
-                                variant="body2"
-                                sx={{
-                                  maxWidth: "150px",
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                }}
-                              >
-                                {session.notes}
-                              </Typography>
-                            </Tooltip>
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              -
-                            </Typography>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {session.status === "completed" ? (
-                            <Chip
-                              label="Hoàn thành"
-                              color="success"
-                              size="small"
-                            />
-                          ) : session.status === "in_progress" ? (
-                            <Chip
-                              label="Đang diễn ra"
-                              color="primary"
-                              size="small"
-                            />
-                          ) : (
-                            <Chip
-                              label="Chưa bắt đầu"
-                              color="default"
-                              size="small"
-                            />
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Box sx={{ display: "flex", gap: 1 }}>
-                            <Button
-                              variant="contained"
-                              size="small"
-                              color="primary"
-                              onClick={() => handleStartSession(session._id)}
-                              startIcon={
-                                session.status === "completed" ? (
-                                  <CheckCircle />
-                                ) : (
-                                  <PlayArrow />
-                                )
-                              }
-                            >
-                              {session.status === "completed"
-                                ? "Xem"
-                                : "Bắt đầu"}
-                            </Button>
-                            <Tooltip title="Chỉnh sửa thông tin">
-                              <IconButton
-                                size="small"
-                                color="default"
-                                onClick={() => {
-                                  setSessionFormData({
-                                    ...session,
-                                    date: session.date.split("T")[0],
-                                  });
-                                  // Tải danh sách phòng học
-                                  fetchRooms();
-                                  setOpenSessionDialog(true);
-                                }}
-                              >
-                                <Edit />
-                              </IconButton>
-                            </Tooltip>
-                          </Box>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={8} align="center">
-                      Chưa có phiên điểm danh nào
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </TabPanel>
-      </Box>
-
-      {/* Dialog tạo/chỉnh sửa phiên điểm danh */}
-      <Dialog
-        open={openSessionDialog}
-        onClose={handleCloseSessionDialog}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>
-          {sessionFormData._id
-            ? "Chỉnh sửa phiên điểm danh"
-            : "Tạo phiên điểm danh mới"}
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 2 }}>
-            <TextField
-              fullWidth
-              label="Ngày"
-              name="date"
-              type="date"
-              value={sessionFormData.date}
-              onChange={handleSessionFormChange}
-              sx={{ mb: 2 }}
-            />
-
-            <Grid container spacing={2} sx={{ mb: 2 }}>
-              <Grid item xs={6} md={3}>
-                <TextField
-                  fullWidth
-                  label="Tiết bắt đầu"
-                  name="start_period"
-                  type="number"
-                  value={sessionFormData.start_period}
-                  onChange={handleSessionFormChange}
-                  InputProps={{ inputProps: { min: 1, max: 15 } }}
+          {/* Tabs */}
+          <Box sx={{ width: "100%", mt: 3 }}>
+            <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+              <Tabs
+                value={tabValue}
+                onChange={handleChangeTab}
+                aria-label="class tabs"
+                variant="scrollable"
+                scrollButtons="auto"
+              >
+                <Tab
+                  label="Lịch học"
+                  {...a11yProps(0)}
+                  icon={<Event />}
+                  iconPosition="start"
                 />
-              </Grid>
-              <Grid item xs={6} md={3}>
-                <TextField
-                  fullWidth
-                  label="Tiết kết thúc"
-                  name="end_period"
-                  type="number"
-                  value={sessionFormData.end_period}
-                  onChange={handleSessionFormChange}
-                  InputProps={{
-                    inputProps: {
-                      min: sessionFormData.start_period || 1,
-                      max: 15,
-                    },
+                <Tab
+                  label="Buổi điểm danh"
+                  {...a11yProps(1)}
+                  icon={<CalendarToday />}
+                  iconPosition="start"
+                />
+                <Tab
+                  label="Sinh viên"
+                  {...a11yProps(2)}
+                  icon={<School />}
+                  iconPosition="start"
+                />
+                <Tab
+                  label="Thống kê"
+                  {...a11yProps(3)}
+                  icon={<Info />}
+                  iconPosition="start"
+                />
+                <Tab
+                  label="Cấu hình"
+                  {...a11yProps(4)}
+                  icon={<Settings />}
+                  iconPosition="start"
+                />
+              </Tabs>
+            </Box>
+
+            {/* Tab Lịch học */}
+            <TabPanel value={tabValue} index={0}>
+              <Paper elevation={2} sx={{ p: 3, borderRadius: 2 }}>
+                <Typography variant="h6" gutterBottom>
+                  Lịch học của lớp
+                </Typography>
+                {classInfo?.schedule && classInfo.schedule.length > 0 ? (
+                  <TableContainer component={Paper} variant="outlined">
+                    <Table>
+                      <TableHead>
+                        <TableRow sx={{ bgcolor: "grey.100" }}>
+                          <TableCell>Thứ</TableCell>
+                          <TableCell>Tiết học</TableCell>
+                          <TableCell>Thời gian</TableCell>
+                          <TableCell>Phòng học</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {classInfo.schedule.map((day, index) => (
+                          <TableRow key={index}>
+                            <TableCell>
+                              <Chip
+                                label={getDayOfWeekName(day.day_of_week)}
+                                color="primary"
+                                variant="outlined"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              Tiết {day.start_period} - {day.end_period}
+                            </TableCell>
+                            <TableCell>
+                              {day.start_time} - {day.end_time}
+                            </TableCell>
+                            <TableCell>
+                              {(day.room_id &&
+                                rooms.find((r) => r._id === day.room_id)
+                                  ?.room_number) ||
+                                (classInfo.room?.room_number
+                                  ? classInfo.room.room_number
+                                  : "Chưa xác định")}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : (
+                  <Alert severity="info">
+                    Chưa có thông tin lịch học cho lớp này
+                  </Alert>
+                )}
+                {/* Nút chỉnh sửa lịch học trong tab Lịch học - Bỏ điều kiện editMode */}
+                <Tooltip
+                  title={
+                    derivedClassStatus !== "NOT_STARTED"
+                      ? `Lớp học ${getVietnameseClassStatus(
+                          derivedClassStatus
+                        )}, không thể chỉnh sửa`
+                      : "Chỉnh sửa lịch học"
+                  }
+                >
+                  <span>
+                    {" "}
+                    {/* Span để Tooltip hoạt động khi Button bị disabled */}
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={handleOpenEditClassDialog}
+                      sx={{ mt: 2 }}
+                      startIcon={<Edit />}
+                      disabled={
+                        derivedClassStatus !== "NOT_STARTED" || isUpdating
+                      }
+                    >
+                      Chỉnh sửa lịch học
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Paper>
+            </TabPanel>
+
+            {/* Tab Buổi điểm danh */}
+            <TabPanel value={tabValue} index={1}>
+              <Paper elevation={2} sx={{ p: 3, borderRadius: 2 }}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    mb: 3,
                   }}
-                />
-              </Grid>
-              <Grid item xs={6} md={3}>
-                <TextField
-                  fullWidth
-                  label="Thời gian bắt đầu"
-                  name="start_time"
-                  type="time"
-                  value={sessionFormData.start_time}
-                  onChange={handleSessionFormChange}
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-              <Grid item xs={6} md={3}>
-                <TextField
-                  fullWidth
-                  label="Thời gian kết thúc"
-                  name="end_time"
-                  type="time"
-                  value={sessionFormData.end_time}
-                  onChange={handleSessionFormChange}
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-            </Grid>
-
-            <Grid container spacing={2} sx={{ mb: 2 }}>
-              <Grid item xs={12}>
-                <FormControl fullWidth>
-                  <InputLabel>Phòng học</InputLabel>
-                  <Select
-                    name="room"
-                    value={sessionFormData.room || ""}
-                    onChange={handleSessionFormChange}
-                    label="Phòng học"
+                >
+                  <Typography variant="h6" gutterBottom>
+                    Quản lý điểm danh
+                  </Typography>
+                  {/* Nút tạo buổi điểm danh - ĐÃ BỊ XÓA
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    startIcon={<Add />}
+                    onClick={handleOpenSessionDialog}
                   >
-                    <MenuItem value="">-- Chọn phòng học --</MenuItem>
-                    {rooms &&
-                      rooms.map((room) => (
-                        <MenuItem key={room._id} value={room._id}>
-                          {room.room_number || "Không xác định"} -{" "}
-                          {room.building_id?.name || "Không xác định"} -{" "}
-                          {room.building_id?.campus_id?.name ||
-                            "Không xác định"}
+                    Tạo buổi điểm danh
+                  </Button>
+                  */}
+                </Box>
+
+                {attendanceSessions.length > 0 ? (
+                  <TableContainer component={Paper} variant="outlined">
+                    <Table>
+                      <TableHead>
+                        <TableRow sx={{ bgcolor: "grey.100" }}>
+                          <TableCell>Ngày</TableCell>
+                          <TableCell>Thời gian</TableCell>
+                          <TableCell>Trạng thái</TableCell>
+                          <TableCell>Phòng học</TableCell>
+                          <TableCell>Ghi chú</TableCell>
+                          <TableCell align="right">Thao tác</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {attendanceSessions.map((session) => (
+                          <TableRow key={session._id}>
+                            <TableCell>
+                              {new Date(session.date).toLocaleDateString(
+                                "vi-VN"
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {session.start_time && session.end_time
+                                ? `${new Date(
+                                    session.start_time
+                                  ).toLocaleTimeString("vi-VN", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    timeZone: "UTC",
+                                  })} - ${new Date(
+                                    session.end_time
+                                  ).toLocaleTimeString("vi-VN", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    timeZone: "UTC",
+                                  })}`
+                                : "N/A"}
+                            </TableCell>
+                            <TableCell>
+                              <Chip
+                                label={
+                                  session.status === "completed"
+                                    ? "Đã hoàn thành"
+                                    : session.status === "active"
+                                    ? "Đang diễn ra"
+                                    : "Chưa bắt đầu"
+                                }
+                                color={
+                                  session.status === "completed"
+                                    ? "success"
+                                    : session.status === "active"
+                                    ? "warning"
+                                    : "primary"
+                                }
+                                size="small"
+                                variant="outlined"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              {getRoomDetailsString(
+                                session.room?._id || session.room
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {session.notes && session.notes.length > 20
+                                ? `${session.notes.substring(0, 20)}...`
+                                : session.notes || ""}
+                            </TableCell>
+                            <TableCell align="right">
+                              <Tooltip
+                                title={
+                                  session.notes
+                                    ? "Xem/Sửa Ghi chú"
+                                    : "Thêm Ghi chú"
+                                }
+                              >
+                                <IconButton
+                                  onClick={() => handleOpenNotesDialog(session)}
+                                  size="small"
+                                  sx={{ mr: 0.5 }}
+                                >
+                                  <AssignmentIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                              <Button
+                                variant="contained"
+                                color="primary"
+                                size="small"
+                                onClick={() => handleStartSession(session._id)}
+                                startIcon={
+                                  session.status === "completed" ? (
+                                    <CheckCircle />
+                                  ) : (
+                                    <PlayArrow />
+                                  )
+                                }
+                              >
+                                {session.status === "completed"
+                                  ? "Xem"
+                                  : "Bắt đầu"}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : (
+                  <Alert severity="info">
+                    Chưa có buổi điểm danh nào được tạo
+                  </Alert>
+                )}
+              </Paper>
+            </TabPanel>
+
+            {/* Tab Sinh viên */}
+            <TabPanel value={tabValue} index={2}>
+              <Paper elevation={2} sx={{ p: 3, borderRadius: 2 }}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    mb: 3,
+                  }}
+                >
+                  <Typography variant="h6" gutterBottom>
+                    Danh sách sinh viên ({students.length})
+                  </Typography>
+                  <Box>
+                    <Button
+                      variant="outlined"
+                      color="primary"
+                      startIcon={<Download />}
+                      onClick={handleExportStudentList}
+                      sx={{ mr: 1 }}
+                    >
+                      Xuất DS
+                    </Button>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      startIcon={<PersonAdd />}
+                      onClick={handleOpenAddStudentDialog}
+                    >
+                      Thêm sinh viên
+                    </Button>
+                  </Box>
+                </Box>
+
+                {students.length > 0 ? (
+                  <TableContainer component={Paper} variant="outlined">
+                    <Table>
+                      <TableHead>
+                        <TableRow sx={{ bgcolor: "grey.100" }}>
+                          <TableCell>STT</TableCell>
+                          <TableCell>Mã SV</TableCell>
+                          <TableCell>Họ tên</TableCell>
+                          <TableCell>Email</TableCell>
+                          <TableCell>Đăng ký khuôn mặt</TableCell>
+                          <TableCell>Số buổi vắng</TableCell>
+                          <TableCell>Điều kiện thi</TableCell>
+                          <TableCell align="right">Thao tác</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {students.map((student, index) => (
+                          <TableRow key={student._id}>
+                            <TableCell>{index + 1}</TableCell>
+                            <TableCell>
+                              {student.school_info?.student_id ||
+                                "Chưa có mã SV"}
+                            </TableCell>
+                            <TableCell>{student.full_name}</TableCell>
+                            <TableCell>{student.email}</TableCell>
+                            <TableCell>
+                              <Chip
+                                label={
+                                  student.has_face_data
+                                    ? "Đã đăng ký"
+                                    : "Chưa đăng ký"
+                                }
+                                color={
+                                  student.has_face_data ? "success" : "warning"
+                                }
+                                size="small"
+                                variant="outlined"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              {student.score ? (
+                                <Tooltip
+                                  title={`Tối đa vắng: ${
+                                    student.score.max_absent_allowed != null
+                                      ? student.score.max_absent_allowed
+                                      : classInfo?.max_absent_allowed || "N/A"
+                                  } buổi`}
+                                >
+                                  <Chip
+                                    label={`${
+                                      student.score.absent_sessions ?? 0
+                                    } / ${
+                                      student.score.max_absent_allowed != null
+                                        ? student.score.max_absent_allowed
+                                        : classInfo?.max_absent_allowed || "N/A"
+                                    }`}
+                                    size="small"
+                                    color={
+                                      (student.score.absent_sessions ?? 0) >
+                                      (student.score.max_absent_allowed != null
+                                        ? student.score.max_absent_allowed
+                                        : classInfo?.max_absent_allowed ||
+                                          Infinity)
+                                        ? "error"
+                                        : "default"
+                                    }
+                                    variant="outlined"
+                                  />
+                                </Tooltip>
+                              ) : (
+                                <Chip
+                                  label="N/A"
+                                  size="small"
+                                  variant="outlined"
+                                />
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {student.score ? (
+                                student.score.is_failed_due_to_absent ? (
+                                  <Chip
+                                    label="Không đủ ĐK (vắng)"
+                                    color="error"
+                                    size="small"
+                                  />
+                                ) : (
+                                  <Chip
+                                    label="Đủ điều kiện"
+                                    color="success"
+                                    size="small"
+                                  />
+                                )
+                              ) : (
+                                <Chip
+                                  label="Chưa có dữ liệu"
+                                  size="small"
+                                  variant="outlined"
+                                />
+                              )}
+                            </TableCell>
+                            <TableCell align="right">
+                              <IconButton
+                                color="error"
+                                onClick={() => handleRemoveStudent(student._id)}
+                                size="small"
+                              >
+                                <Delete fontSize="small" />
+                              </IconButton>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : (
+                  <Alert severity="info">
+                    Chưa có sinh viên nào trong lớp này
+                  </Alert>
+                )}
+              </Paper>
+            </TabPanel>
+
+            {/* Tab Thống kê */}
+            <TabPanel value={tabValue} index={3}>
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={6}>
+                  <Paper
+                    elevation={2}
+                    sx={{ p: 3, borderRadius: 2, height: "100%" }}
+                  >
+                    <Typography variant="h6" gutterBottom>
+                      Thống kê điểm danh
+                    </Typography>
+                    <Box sx={{ mt: 2 }}>
+                      <Grid container spacing={2}>
+                        <Grid item xs={12} sm={4}>
+                          <Paper
+                            sx={{
+                              p: 2,
+                              textAlign: "center",
+                              bgcolor: "primary.lighter",
+                              color: "primary.dark",
+                              borderRadius: 2,
+                            }}
+                          >
+                            <Typography variant="h4">
+                              {attendanceStats.total}
+                            </Typography>
+                            <Typography variant="body2">
+                              Tổng buổi học
+                            </Typography>
+                          </Paper>
+                        </Grid>
+                        <Grid item xs={12} sm={4}>
+                          <Paper
+                            sx={{
+                              p: 2,
+                              textAlign: "center",
+                              bgcolor: "success.lighter",
+                              color: "success.dark",
+                              borderRadius: 2,
+                            }}
+                          >
+                            <Typography variant="h4">
+                              {attendanceStats.completed}
+                            </Typography>
+                            <Typography variant="body2">
+                              Đã hoàn thành
+                            </Typography>
+                          </Paper>
+                        </Grid>
+                        <Grid item xs={12} sm={4}>
+                          <Paper
+                            sx={{
+                              p: 2,
+                              textAlign: "center",
+                              bgcolor: "warning.lighter",
+                              color: "warning.dark",
+                              borderRadius: 2,
+                            }}
+                          >
+                            <Typography variant="h4">
+                              {attendanceStats.pending}
+                            </Typography>
+                            <Typography variant="body2">
+                              Chưa bắt đầu
+                            </Typography>
+                          </Paper>
+                        </Grid>
+                      </Grid>
+                    </Box>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Paper
+                    elevation={2}
+                    sx={{ p: 3, borderRadius: 2, height: "100%" }}
+                  >
+                    <Typography variant="h6" gutterBottom>
+                      Thống kê sinh viên
+                    </Typography>
+                    <Box sx={{ mt: 2 }}>
+                      <Grid container spacing={2}>
+                        <Grid item xs={12} sm={4}>
+                          <Paper
+                            sx={{
+                              p: 2,
+                              textAlign: "center",
+                              bgcolor: "info.lighter",
+                              color: "info.dark",
+                              borderRadius: 2,
+                            }}
+                          >
+                            <Typography variant="h4">
+                              {students.length}
+                            </Typography>
+                            <Typography variant="body2">
+                              Tổng sinh viên
+                            </Typography>
+                          </Paper>
+                        </Grid>
+                        <Grid item xs={12} sm={4}>
+                          <Paper
+                            sx={{
+                              p: 2,
+                              textAlign: "center",
+                              bgcolor: "success.lighter",
+                              color: "success.dark",
+                              borderRadius: 2,
+                            }}
+                          >
+                            <Typography variant="h4">
+                              {students.filter((s) => s.has_face_data).length}
+                            </Typography>
+                            <Typography variant="body2">
+                              Đã đăng ký KM
+                            </Typography>
+                          </Paper>
+                        </Grid>
+                        <Grid item xs={12} sm={4}>
+                          <Paper
+                            sx={{
+                              p: 2,
+                              textAlign: "center",
+                              bgcolor: "warning.lighter",
+                              color: "warning.dark",
+                              borderRadius: 2,
+                            }}
+                          >
+                            <Typography variant="h4">
+                              {students.filter((s) => !s.has_face_data).length}
+                            </Typography>
+                            <Typography variant="body2">
+                              Chưa đăng ký KM
+                            </Typography>
+                          </Paper>
+                        </Grid>
+                      </Grid>
+                    </Box>
+                  </Paper>
+                </Grid>
+              </Grid>
+            </TabPanel>
+
+            {/* Tab Cấu hình */}
+            <TabPanel value={tabValue} index={4}>
+              <Paper elevation={2} sx={{ p: 3, borderRadius: 2 }}>
+                <Typography variant="h6" gutterBottom>
+                  Cấu hình lớp học
+                </Typography>
+
+                <Tooltip
+                  title={
+                    derivedClassStatus !== "NOT_STARTED"
+                      ? `Lớp học ${getVietnameseClassStatus(
+                          derivedClassStatus
+                        )}, không thể chỉnh sửa`
+                      : "Chỉnh sửa thông tin lớp"
+                  }
+                >
+                  <span>
+                    {" "}
+                    {/* Span để Tooltip hoạt động khi Button bị disabled */}
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      startIcon={<Edit />}
+                      onClick={handleOpenEditClassDialog}
+                      sx={{ mt: 2 }}
+                      disabled={
+                        derivedClassStatus !== "NOT_STARTED" || isUpdating
+                      }
+                    >
+                      Chỉnh sửa thông tin lớp
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Paper>
+            </TabPanel>
+          </Box>
+
+          {/* Dialog thêm sinh viên */}
+          <Dialog
+            open={openAddStudentDialog}
+            onClose={handleCloseAddStudentDialog}
+            maxWidth="md"
+            fullWidth
+          >
+            <DialogTitle>Thêm sinh viên vào lớp</DialogTitle>
+            <DialogContent dividers>
+              <Grid container spacing={2}>
+                <Grid item xs={12}>
+                  <FormControl fullWidth sx={{ mb: 2 }}>
+                    <InputLabel>Chọn lớp chính</InputLabel>
+                    <Select
+                      value={selectedMainClass}
+                      onChange={handleMainClassChange}
+                      label="Chọn lớp chính"
+                    >
+                      <MenuItem value="">Chọn lớp chính</MenuItem>
+                      {mainClasses.map((cls) => (
+                        <MenuItem key={cls._id} value={cls._id}>
+                          {cls.name} ({cls.class_code})
                         </MenuItem>
                       ))}
-                  </Select>
-                  <FormHelperText>
-                    Chọn phòng học với thông tin đầy đủ
-                  </FormHelperText>
-                </FormControl>
-              </Grid>
-            </Grid>
+                    </Select>
+                    <FormHelperText>
+                      Chọn lớp chính để xem danh sách sinh viên
+                    </FormHelperText>
+                  </FormControl>
+                </Grid>
 
-            <TextField
-              fullWidth
-              label="Ghi chú"
-              name="notes"
-              multiline
-              rows={3}
-              placeholder="Nội dung buổi học, yêu cầu đặc biệt, v.v..."
-              value={sessionFormData.notes}
-              onChange={handleSessionFormChange}
-              sx={{ mb: 2 }}
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseSessionDialog}>Hủy</Button>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={
-              sessionFormData._id ? handleUpdateSession : handleCreateSession
-            }
-          >
-            {sessionFormData._id ? "Lưu thay đổi" : "Tạo"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    label="Tìm kiếm sinh viên"
+                    variant="outlined"
+                    value={searchStudent}
+                    onChange={(e) => setSearchStudent(e.target.value)}
+                    placeholder="Nhập tên, mã SV hoặc email để tìm kiếm"
+                    sx={{ mb: 2 }}
+                  />
+                </Grid>
 
-      {/* Dialog thêm sinh viên */}
-      <Dialog
-        open={openAddStudentDialog}
-        onClose={handleCloseAddStudentDialog}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>Thêm sinh viên vào lớp</DialogTitle>
-        <DialogContent>
-          <Box sx={{ mb: 3, mt: 1 }}>
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Chọn lớp chính</InputLabel>
-              <Select
-                value={selectedMainClass}
-                onChange={handleMainClassChange}
-                label="Chọn lớp chính"
-                disabled={isLoadingStudents}
-              >
-                <MenuItem value="">-- Chọn lớp chính --</MenuItem>
-                {mainClasses.map((mainClass) => (
-                  <MenuItem key={mainClass._id} value={mainClass._id}>
-                    {mainClass.name} ({mainClass.class_code})
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            {selectedMainClass && (
-              <TextField
-                fullWidth
-                label="Tìm kiếm sinh viên"
-                value={searchStudent}
-                onChange={(e) => setSearchStudent(e.target.value)}
-                disabled={isLoadingStudents}
-              />
-            )}
-          </Box>
-
-          {isLoadingStudents ? (
-            <Box sx={{ display: "flex", justifyContent: "center", my: 3 }}>
-              <CircularProgress />
-            </Box>
-          ) : (
-            <Box sx={{ maxHeight: 400, overflow: "auto", mb: 2 }}>
-              {!selectedMainClass ? (
-                <Alert severity="info">
-                  Vui lòng chọn lớp chính để xem danh sách sinh viên
-                </Alert>
-              ) : availableStudents.length === 0 ? (
-                <Alert severity="warning">
-                  Không tìm thấy sinh viên có thể thêm vào lớp
-                </Alert>
-              ) : (
-                <List>
-                  {availableStudents
-                    .filter(
-                      (student) =>
-                        student.full_name
-                          ?.toLowerCase()
-                          .includes(searchStudent.toLowerCase()) ||
-                        student.school_info?.student_id
-                          ?.toLowerCase()
-                          .includes(searchStudent.toLowerCase()) ||
-                        student.email
-                          ?.toLowerCase()
-                          .includes(searchStudent.toLowerCase())
-                    )
-                    .map((student) => (
-                      <React.Fragment key={student._id}>
-                        <ListItem>
+                <Grid item xs={12}>
+                  {isLoadingStudents ? (
+                    <Box
+                      sx={{
+                        display: "flex",
+                        justifyContent: "center",
+                        p: 3,
+                      }}
+                    >
+                      <CircularProgress />
+                    </Box>
+                  ) : filteredAvailableStudents.length > 0 ? (
+                    <List
+                      sx={{
+                        width: "100%",
+                        bgcolor: "background.paper",
+                        maxHeight: 300,
+                        overflow: "auto",
+                      }}
+                    >
+                      {filteredAvailableStudents.map((student) => (
+                        <ListItem key={student._id} divider>
+                          <Checkbox
+                            checked={selectedStudents.includes(student._id)}
+                            onChange={() => handleSelectStudent(student._id)}
+                          />
                           <ListItemText
-                            primary={student.full_name || student.name}
+                            primary={student.full_name}
                             secondary={
                               <>
-                                {student.school_info?.student_id ||
-                                  "Chưa có mã SV"}{" "}
-                                - {student.email}
+                                MSSV: {student.school_info?.student_id || "N/A"}
+                                <br />
+                                Email: {student.email}
                               </>
                             }
                           />
-                          <ListItemSecondaryAction>
-                            <Checkbox
-                              edge="end"
-                              checked={selectedStudents.includes(student._id)}
-                              onChange={() => handleSelectStudent(student._id)}
-                            />
-                          </ListItemSecondaryAction>
                         </ListItem>
-                        <Divider />
-                      </React.Fragment>
-                    ))}
-                </List>
-              )}
-            </Box>
-          )}
+                      ))}
+                    </List>
+                  ) : (
+                    <Alert severity="info" sx={{ width: "100%" }}>
+                      {!selectedMainClass
+                        ? "Vui lòng chọn lớp chính để xem danh sách sinh viên"
+                        : "Không tìm thấy sinh viên phù hợp hoặc đã thêm tất cả sinh viên từ lớp này"}
+                    </Alert>
+                  )}
+                </Grid>
+              </Grid>
+            </DialogContent>
+            <DialogActions sx={{ p: 2, justifyContent: "space-between" }}>
+              <Button
+                onClick={handleCloseAddStudentDialog}
+                color="inherit"
+                variant="outlined"
+              >
+                Hủy
+              </Button>
+              <Button
+                onClick={handleAddStudents}
+                color="primary"
+                variant="contained"
+                disabled={selectedStudents.length === 0}
+              >
+                Thêm {selectedStudents.length} sinh viên
+              </Button>
+            </DialogActions>
+          </Dialog>
 
-          <Box sx={{ textAlign: "right" }}>
-            <Typography variant="body2">
-              Đã chọn: {selectedStudents.length} sinh viên
-            </Typography>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseAddStudentDialog}>Hủy</Button>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={handleAddStudents}
-            disabled={selectedStudents.length === 0 || isLoadingStudents}
+          {/* Dialog tạo buổi điểm danh */}
+          <Dialog
+            open={openSessionDialog}
+            onClose={handleCloseSessionDialog}
+            maxWidth="md"
+            fullWidth
           >
-            Thêm vào lớp
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Dialog chỉnh sửa lớp học */}
-      <Dialog
-        open={openEditClassDialog}
-        onClose={handleCloseEditClassDialog}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle
-          sx={{ bgcolor: "primary.main", color: "white", fontWeight: "bold" }}
-        >
-          <Edit sx={{ verticalAlign: "middle", mr: 1 }} />
-          Chỉnh sửa thông tin lớp học
-        </DialogTitle>
-        <DialogContent dividers>
-          {editClassData && (
-            <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Tên lớp"
-                  name="class_name"
-                  value={editClassData.class_name}
-                  onChange={handleEditClassChange}
-                  required
-                  variant="outlined"
-                  placeholder="VD: Lập trình web - Nhóm 1"
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Mã lớp"
-                  name="class_code"
-                  value={editClassData.class_code}
-                  onChange={handleEditClassChange}
-                  required
-                  variant="outlined"
-                  placeholder="VD: WEB101-G1"
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth required>
-                  <InputLabel>Môn học</InputLabel>
-                  <Select
-                    label="Môn học"
-                    name="subject_id"
-                    value={editClassData.subject_id}
-                    onChange={handleEditClassChange}
-                  >
-                    {subjects.map((subject) => (
-                      <MenuItem key={subject._id} value={subject._id}>
-                        {subject.name} ({subject.code})
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth required>
-                  <InputLabel>Học kỳ</InputLabel>
-                  <Select
-                    label="Học kỳ"
-                    name="semester_id"
-                    value={editClassData.semester_id}
-                    onChange={handleEditClassChange}
-                  >
-                    {semesters.map((sem) => (
-                      <MenuItem key={sem._id} value={sem._id}>
-                        {sem.name} ({sem.academic_year})
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Lớp chính</InputLabel>
-                  <Select
-                    label="Lớp chính"
-                    name="main_class_id"
-                    value={editClassData.main_class_id}
-                    onChange={handleEditClassChange}
-                  >
-                    <MenuItem value="">Không chọn lớp chính</MenuItem>
-                    {mainClasses.map((mainClass) => (
-                      <MenuItem key={mainClass._id} value={mainClass._id}>
-                        {mainClass.name} ({mainClass.class_code})
-                      </MenuItem>
-                    ))}
-                  </Select>
-                  <FormHelperText>
-                    Có thể để trống nếu lớp dành cho nhiều lớp chính
-                  </FormHelperText>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  type="number"
-                  label="Tổng số buổi học"
-                  name="total_sessions"
-                  value={editClassData.total_sessions}
-                  onChange={handleTotalSessionsChange}
-                  required
-                  variant="outlined"
-                  InputProps={{ inputProps: { min: 1 } }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  type="date"
-                  label="Ngày bắt đầu khóa học"
-                  name="course_start_date"
-                  value={editClassData.course_start_date}
-                  onChange={handleStartDateChange}
-                  required
-                  variant="outlined"
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  type="date"
-                  label="Ngày kết thúc khóa học"
-                  name="course_end_date"
-                  value={editClassData.course_end_date}
-                  onChange={handleEditClassChange}
-                  variant="outlined"
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-
-              {/* Chọn phòng học */}
-              <Grid item xs={12}>
-                <Typography
-                  variant="subtitle1"
-                  gutterBottom
-                  sx={{ fontWeight: "bold", mt: 2 }}
-                >
-                  <Room sx={{ verticalAlign: "middle", mr: 1 }} />
-                  Thông tin phòng học
-                </Typography>
-                <Divider sx={{ mb: 2 }} />
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <FormControl fullWidth>
-                  <InputLabel>Cơ sở</InputLabel>
-                  <Select
-                    label="Cơ sở"
-                    value={selectedCampus}
-                    onChange={handleCampusChange}
-                  >
-                    <MenuItem value="">Chọn cơ sở</MenuItem>
-                    {campuses.map((campus) => (
-                      <MenuItem key={campus._id} value={campus._id}>
-                        {campus.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <FormControl fullWidth disabled={!selectedCampus}>
-                  <InputLabel>Tòa nhà</InputLabel>
-                  <Select
-                    label="Tòa nhà"
-                    value={selectedBuilding}
-                    onChange={handleBuildingChange}
-                  >
-                    <MenuItem value="">Chọn tòa nhà</MenuItem>
-                    {buildings.map((building) => (
-                      <MenuItem key={building._id} value={building._id}>
-                        {building.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <FormControl fullWidth disabled={!selectedBuilding}>
-                  <InputLabel>Phòng học</InputLabel>
-                  <Select
-                    label="Phòng học"
-                    name="room_id"
-                    value={editClassData.room_id}
-                    onChange={handleEditClassChange}
-                  >
-                    <MenuItem value="">Chọn phòng học</MenuItem>
-                    {rooms.map((room) => (
-                      <MenuItem key={room._id} value={room._id}>
-                        {room.room_number} (Sức chứa: {room.capacity})
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-
-              {/* Lịch học */}
-              <Grid item xs={12}>
-                <Typography
-                  variant="subtitle1"
-                  gutterBottom
-                  sx={{ fontWeight: "bold", mt: 2 }}
-                >
-                  <Event sx={{ verticalAlign: "middle", mr: 1 }} />
-                  Lịch học
-                </Typography>
-                <Divider sx={{ mb: 2 }} />
-              </Grid>
-
-              {scheduleDays.map((day, index) => (
-                <Grid
-                  container
-                  spacing={2}
-                  key={index}
-                  sx={{
-                    ml: 0,
-                    mt: 1,
-                    width: "100%",
-                    pb: 2,
-                    borderBottom:
-                      index < scheduleDays.length - 1
-                        ? "1px dashed #ddd"
-                        : "none",
-                  }}
-                >
-                  <Grid item xs={12} sm={3}>
-                    <TextField
-                      fullWidth
-                      label="Thứ trong tuần"
-                      value={getDayOfWeekName(day.day_of_week)}
-                      InputProps={{
-                        readOnly: true,
-                      }}
-                      variant="outlined"
-                      helperText="Được xác định từ ngày bắt đầu"
-                    />
-                  </Grid>
-                  <Grid item xs={6} sm={2}>
-                    <TextField
-                      fullWidth
-                      label="Tiết bắt đầu"
-                      type="number"
-                      value={day.start_period}
-                      onChange={(e) =>
-                        handleScheduleChange(
-                          index,
-                          "start_period",
-                          parseInt(e.target.value)
-                        )
-                      }
-                      InputProps={{ inputProps: { min: 1, max: 15 } }}
-                    />
-                  </Grid>
-                  <Grid item xs={6} sm={2}>
-                    <TextField
-                      fullWidth
-                      label="Tiết kết thúc"
-                      type="number"
-                      value={day.end_period}
-                      onChange={(e) =>
-                        handleScheduleChange(
-                          index,
-                          "end_period",
-                          parseInt(e.target.value)
-                        )
-                      }
-                      InputProps={{
-                        inputProps: { min: day.start_period, max: 15 },
-                      }}
-                    />
-                  </Grid>
-                  <Grid item xs={6} sm={2}>
-                    <TextField
-                      fullWidth
-                      label="Giờ bắt đầu"
-                      type="time"
-                      value={day.start_time}
-                      onChange={(e) =>
-                        handleScheduleChange(
-                          index,
-                          "start_time",
-                          e.target.value
-                        )
-                      }
-                      InputLabelProps={{ shrink: true }}
-                    />
-                  </Grid>
-                  <Grid item xs={6} sm={2}>
-                    <TextField
-                      fullWidth
-                      label="Giờ kết thúc"
-                      type="time"
-                      value={day.end_time}
-                      onChange={(e) =>
-                        handleScheduleChange(index, "end_time", e.target.value)
-                      }
-                      InputLabelProps={{ shrink: true }}
-                    />
-                  </Grid>
-                  <Grid
-                    item
-                    xs={12}
-                    sm={1}
-                    sx={{ display: "flex", alignItems: "center" }}
-                  >
-                    <IconButton
-                      color="error"
-                      onClick={() => removeScheduleDay(index)}
-                      disabled={scheduleDays.length <= 1}
+            <DialogTitle>
+              {sessionFormData._id
+                ? "Chỉnh sửa buổi điểm danh"
+                : "Tạo buổi điểm danh mới"}
+            </DialogTitle>
+            <DialogContent dividers>
+              <Grid container spacing={2} sx={{ pt: 1 }}>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="Tên buổi học"
+                    name="title"
+                    value={sessionFormData.title}
+                    onChange={handleSessionFormChange}
+                    required
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="Số buổi (thứ tự)"
+                    name="session_number"
+                    type="number"
+                    value={sessionFormData.session_number}
+                    onChange={handleSessionFormChange}
+                    required
+                    InputProps={{
+                      inputProps: {
+                        min: 1,
+                        max: classInfo?.total_sessions || 15,
+                      },
+                    }}
+                    helperText={`Buổi học thứ (1-${
+                      classInfo?.total_sessions || "?"
+                    })`}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="Ngày"
+                    name="date"
+                    type="date"
+                    value={sessionFormData.date}
+                    onChange={handleSessionFormChange}
+                    required
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth>
+                    <InputLabel>Phòng học</InputLabel>
+                    <Select
+                      label="Phòng học"
+                      name="room"
+                      value={sessionFormData.room}
+                      onChange={handleSessionFormChange}
                     >
-                      <Chip
-                        label="Xóa"
-                        color="error"
-                        size="small"
-                        variant="outlined"
-                        disabled={scheduleDays.length <= 1}
-                      />
-                    </IconButton>
+                      <MenuItem value="">
+                        <em>Không chọn phòng học</em>
+                      </MenuItem>
+                      {rooms.map((room) => (
+                        <MenuItem key={room._id} value={room._id}>
+                          {room.room_number} - Tòa{" "}
+                          {room.building_id?.name || "N/A"}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                    <FormHelperText>
+                      Chọn phòng học cho buổi điểm danh
+                    </FormHelperText>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="Giờ bắt đầu"
+                    name="start_time"
+                    type="time"
+                    value={sessionFormData.start_time}
+                    onChange={handleSessionFormChange}
+                    required
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="Giờ kết thúc"
+                    name="end_time"
+                    type="time"
+                    value={sessionFormData.end_time}
+                    onChange={handleSessionFormChange}
+                    required
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="Tiết bắt đầu"
+                    name="start_period"
+                    type="number"
+                    value={sessionFormData.start_period}
+                    onChange={handleSessionFormChange}
+                    InputProps={{ inputProps: { min: 1, max: 15 } }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="Tiết kết thúc"
+                    name="end_period"
+                    type="number"
+                    value={sessionFormData.end_period}
+                    onChange={handleSessionFormChange}
+                    InputProps={{ inputProps: { min: 1, max: 15 } }}
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    label="Ghi chú"
+                    name="notes"
+                    multiline
+                    rows={3}
+                    value={sessionFormData.notes}
+                    onChange={handleSessionFormChange}
+                    placeholder="Nhập ghi chú về buổi học (nếu có)"
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  <Alert severity="info" sx={{ mt: 1 }}>
+                    Lưu ý: Thời gian buổi học phải nằm trong khoảng thời gian
+                    của học kỳ (
+                    {classInfo?.semester_id?.start_date
+                      ? new Date(
+                          classInfo.semester_id.start_date
+                        ).toLocaleDateString("vi-VN")
+                      : "?"}{" "}
+                    -
+                    {classInfo?.semester_id?.end_date
+                      ? new Date(
+                          classInfo.semester_id.end_date
+                        ).toLocaleDateString("vi-VN")
+                      : "?"}
+                    )
+                  </Alert>
+                </Grid>
+              </Grid>
+            </DialogContent>
+            <DialogActions sx={{ p: 2, justifyContent: "space-between" }}>
+              <Button
+                onClick={handleCloseSessionDialog}
+                color="inherit"
+                variant="outlined"
+              >
+                Hủy
+              </Button>
+              <Button
+                onClick={
+                  sessionFormData._id
+                    ? handleUpdateSession
+                    : handleCreateSession
+                }
+                color="primary"
+                variant="contained"
+              >
+                {sessionFormData._id ? "Cập nhật" : "Tạo buổi điểm danh"}
+              </Button>
+            </DialogActions>
+          </Dialog>
+
+          {/* Dialog chỉnh sửa lớp học */}
+          <Dialog
+            open={openEditClassDialog}
+            onClose={handleCloseEditClassDialog}
+            maxWidth="md"
+            fullWidth
+          >
+            <DialogTitle>Chỉnh sửa thông tin lớp học</DialogTitle>
+            <DialogContent dividers>
+              {editClassData && (
+                <Grid container spacing={2} sx={{ pt: 1 }}>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Tên lớp"
+                      name="class_name"
+                      value={editClassData.class_name}
+                      onChange={handleEditClassChange}
+                      required
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Mã lớp"
+                      name="class_code"
+                      value={editClassData.class_code}
+                      onChange={handleEditClassChange}
+                      required
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <FormControl fullWidth>
+                      <InputLabel>Môn học</InputLabel>
+                      <Select
+                        name="subject_id"
+                        value={editClassData.subject_id}
+                        onChange={handleEditClassChange}
+                        label="Môn học"
+                      >
+                        {subjects.map((subject) => (
+                          <MenuItem key={subject._id} value={subject._id}>
+                            {subject.name} ({subject.code})
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <FormControl fullWidth>
+                      <InputLabel>Học kỳ</InputLabel>
+                      <Select
+                        name="semester_id"
+                        value={editClassData.semester_id}
+                        onChange={handleEditClassChange}
+                        label="Học kỳ"
+                      >
+                        {semesters.map((semester) => (
+                          <MenuItem key={semester._id} value={semester._id}>
+                            {semester.name} (
+                            {semester.academic_year || semester.year})
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <FormControl fullWidth>
+                      <InputLabel>Lớp chính</InputLabel>
+                      <Select
+                        name="main_class_id"
+                        value={editClassData.main_class_id}
+                        onChange={handleEditClassChange}
+                        label="Lớp chính"
+                      >
+                        <MenuItem value="">Không chọn lớp chính</MenuItem>
+                        {mainClasses.map((cls) => (
+                          <MenuItem key={cls._id} value={cls._id}>
+                            {cls.name} ({cls.class_code})
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Số buổi học"
+                      name="total_sessions"
+                      type="number"
+                      value={editClassData.total_sessions}
+                      onChange={handleTotalSessionsChange}
+                      InputProps={{ inputProps: { min: 1 } }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Ngày bắt đầu"
+                      name="course_start_date"
+                      type="date"
+                      value={editClassData.course_start_date}
+                      onChange={handleStartDateChange}
+                      InputLabelProps={{ shrink: true }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Ngày kết thúc (tự động tính)"
+                      name="course_end_date"
+                      type="date"
+                      value={editClassData.course_end_date}
+                      disabled
+                      InputLabelProps={{ shrink: true }}
+                    />
                   </Grid>
 
+                  {/* Phần cấu hình lịch học */}
+                  <Grid item xs={12}>
+                    <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>
+                      Cấu hình lịch học
+                    </Typography>
+                    <Divider sx={{ mb: 2 }} />
+
+                    {scheduleDays.map((day, index) => (
+                      <Paper
+                        key={index}
+                        sx={{ p: 2, mb: 2, position: "relative" }}
+                        variant="outlined"
+                      >
+                        <Grid container spacing={2} alignItems="center">
+                          <Grid item xs={12} sm={6} md={3}>
+                            <FormControl fullWidth size="small">
+                              <InputLabel>Thứ</InputLabel>
+                              <Select
+                                label="Thứ"
+                                value={
+                                  day.day_of_week !== undefined
+                                    ? day.day_of_week
+                                    : ""
+                                }
+                                onChange={(e) =>
+                                  handleScheduleChange(
+                                    index,
+                                    "day_of_week",
+                                    e.target.value
+                                  )
+                                }
+                              >
+                                {[0, 1, 2, 3, 4, 5, 6].map((d) => (
+                                  <MenuItem key={d} value={d}>
+                                    {getDayOfWeekName(d)}
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                          </Grid>
+                          <Grid item xs={6} sm={3} md={1.5}>
+                            <TextField
+                              fullWidth
+                              label="Tiết BĐ"
+                              type="number"
+                              size="small"
+                              value={day.start_period}
+                              onChange={(e) =>
+                                handleScheduleChange(
+                                  index,
+                                  "start_period",
+                                  e.target.value
+                                )
+                              }
+                              InputProps={{ inputProps: { min: 1, max: 15 } }}
+                            />
+                          </Grid>
+                          <Grid item xs={6} sm={3} md={1.5}>
+                            <TextField
+                              fullWidth
+                              label="Tiết KT"
+                              type="number"
+                              size="small"
+                              value={day.end_period}
+                              onChange={(e) =>
+                                handleScheduleChange(
+                                  index,
+                                  "end_period",
+                                  e.target.value
+                                )
+                              }
+                              InputProps={{
+                                inputProps: {
+                                  min: day.start_period || 1,
+                                  max: 15,
+                                },
+                              }}
+                            />
+                          </Grid>
+                          {/* Thời gian có thể ẩn hoặc hiển thị dạng readOnly nếu được tính từ tiết */}
+                          <Grid item xs={6} sm={3} md={3}>
+                            <TextField
+                              fullWidth
+                              label="Giờ BĐ"
+                              type="time"
+                              size="small"
+                              value={day.start_time}
+                              InputLabelProps={{ shrink: true }}
+                              onChange={(e) =>
+                                handleScheduleChange(
+                                  index,
+                                  "start_time",
+                                  e.target.value
+                                )
+                              }
+                            />
+                          </Grid>
+                          <Grid item xs={6} sm={3} md={3}>
+                            <TextField
+                              fullWidth
+                              label="Giờ KT"
+                              type="time"
+                              size="small"
+                              value={day.end_time}
+                              InputLabelProps={{ shrink: true }}
+                              onChange={(e) =>
+                                handleScheduleChange(
+                                  index,
+                                  "end_time",
+                                  e.target.value
+                                )
+                              }
+                            />
+                          </Grid>
+
+                          <Grid item xs={12} sm={4} md={4}>
+                            <FormControl fullWidth size="small">
+                              <InputLabel>Cơ sở</InputLabel>
+                              <Select
+                                label="Cơ sở"
+                                value={day.campusId || ""}
+                                onChange={(e) =>
+                                  handleScheduleChange(
+                                    index,
+                                    "campusId",
+                                    e.target.value
+                                  )
+                                }
+                              >
+                                <MenuItem value="">
+                                  <em>Chọn cơ sở</em>
+                                </MenuItem>
+                                {campuses.map((campus) => (
+                                  <MenuItem key={campus._id} value={campus._id}>
+                                    {campus.name}
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                          </Grid>
+                          <Grid item xs={12} sm={4} md={4}>
+                            <FormControl
+                              fullWidth
+                              size="small"
+                              disabled={!day.campusId}
+                            >
+                              <InputLabel>Tòa nhà</InputLabel>
+                              <Select
+                                label="Tòa nhà"
+                                value={day.buildingId || ""}
+                                onChange={(e) =>
+                                  handleScheduleChange(
+                                    index,
+                                    "buildingId",
+                                    e.target.value
+                                  )
+                                }
+                              >
+                                <MenuItem value="">
+                                  <em>Chọn tòa nhà</em>
+                                </MenuItem>
+                                {day.availableBuildings &&
+                                  day.availableBuildings.map((building) => (
+                                    <MenuItem
+                                      key={building._id}
+                                      value={building._id}
+                                    >
+                                      {building.name}
+                                    </MenuItem>
+                                  ))}
+                              </Select>
+                            </FormControl>
+                          </Grid>
+                          <Grid item xs={12} sm={4} md={4}>
+                            <FormControl
+                              fullWidth
+                              size="small"
+                              disabled={!day.buildingId}
+                            >
+                              <InputLabel>Phòng học</InputLabel>
+                              <Select
+                                label="Phòng học"
+                                value={day.room_id || ""}
+                                onChange={(e) =>
+                                  handleScheduleChange(
+                                    index,
+                                    "room_id",
+                                    e.target.value
+                                  )
+                                }
+                              >
+                                <MenuItem value="">
+                                  <em>Chọn phòng học</em>
+                                </MenuItem>
+                                {day.availableRooms &&
+                                  day.availableRooms.map((room) => (
+                                    <MenuItem key={room._id} value={room._id}>
+                                      {room.room_number} (SL: {room.capacity})
+                                    </MenuItem>
+                                  ))}
+                              </Select>
+                            </FormControl>
+                          </Grid>
+                        </Grid>
+
+                        {scheduleDays.length > 1 && (
+                          <IconButton
+                            color="error"
+                            size="small"
+                            onClick={() => removeScheduleDay(index)}
+                            sx={{ position: "absolute", top: 8, right: 8 }}
+                          >
+                            <Delete fontSize="small" />
+                          </IconButton>
+                        )}
+                      </Paper>
+                    ))}
+
+                    <Button
+                      variant="outlined"
+                      startIcon={<Add />}
+                      onClick={addScheduleDay}
+                      sx={{ mt: 1 }}
+                    >
+                      Thêm buổi học
+                    </Button>
+                  </Grid>
+
+                  {/* Xóa Phần chọn Cơ sở, Tòa nhà, Phòng học chung ở cuối */}
+                  {/*
                   <Grid item xs={12} sm={4}>
                     <FormControl fullWidth>
-                      <InputLabel>Phòng học riêng</InputLabel>
+                      <InputLabel>Cơ sở</InputLabel>
                       <Select
-                        label="Phòng học riêng"
-                        value={day.room_id || ""}
-                        onChange={(e) =>
-                          handleScheduleChange(index, "room_id", e.target.value)
-                        }
+                        name="campus_id"
+                        value={selectedCampus}
+                        onChange={handleCampusChange} 
+                        label="Cơ sở"
                       >
-                        <MenuItem value="">Dùng phòng mặc định</MenuItem>
+                        <MenuItem value="">
+                          <em>Chọn cơ sở</em>
+                        </MenuItem>
+                        {campuses.map((campus) => (
+                          <MenuItem key={campus._id} value={campus._id}>
+                            {campus.name}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <FormControl fullWidth disabled={!selectedCampus}>
+                      <InputLabel>Tòa nhà</InputLabel>
+                      <Select
+                        name="building_id"
+                        value={selectedBuilding}
+                        onChange={handleBuildingChange} 
+                        label="Tòa nhà"
+                      >
+                        <MenuItem value="">
+                          <em>Chọn tòa nhà</em>
+                        </MenuItem>
+                        {buildings.map((building) => (
+                          <MenuItem key={building._id} value={building._id}>
+                            {building.name}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <FormControl fullWidth disabled={!selectedBuilding}>
+                      <InputLabel>Phòng học chung</InputLabel>
+                      <Select
+                        name="room_id" 
+                        value={editClassData.room_id || ""} 
+                        onChange={handleEditClassChange} 
+                        label="Phòng học chung"
+                      >
+                        <MenuItem value="">
+                          <em>Chọn phòng học chung</em>
+                        </MenuItem>
                         {rooms.map((room) => (
                           <MenuItem key={room._id} value={room._id}>
-                            {room.room_number} (Sức chứa: {room.capacity})
+                            {room.room_number}
                           </MenuItem>
                         ))}
                       </Select>
                       <FormHelperText>
-                        Phòng học riêng cho buổi này, để trống sẽ dùng phòng mặc
-                        định của lớp
+                        Phòng học này sẽ được dùng mặc định cho các buổi học mới
+                        trong lịch.
                       </FormHelperText>
                     </FormControl>
                   </Grid>
-
-                  <Grid item xs={12} sm={4}>
-                    <FormControl fullWidth>
-                      <InputLabel>Loại lịch</InputLabel>
-                      <Select
-                        label="Loại lịch"
-                        value={day.is_recurring}
-                        onChange={(e) =>
-                          handleScheduleChange(
-                            index,
-                            "is_recurring",
-                            e.target.value
-                          )
-                        }
-                      >
-                        <MenuItem value={true}>Định kỳ hàng tuần</MenuItem>
-                        <MenuItem value={false}>Các ngày cụ thể</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
+                  */}
                 </Grid>
-              ))}
+              )}
+            </DialogContent>
+            <DialogActions
+              sx={{ p: 2, justifyContent: "space-between", bgcolor: "grey.50" }}
+            >
+              <Button
+                onClick={handleCloseEditClassDialog}
+                color="inherit"
+                variant="outlined"
+                disabled={isUpdating || checkingConflicts}
+              >
+                Hủy
+              </Button>
+              <Button
+                onClick={handleUpdateClass}
+                color="primary"
+                variant="contained"
+                disabled={isUpdating || checkingConflicts || !editClassData}
+              >
+                {isUpdating
+                  ? "Đang lưu..."
+                  : checkingConflicts
+                  ? "Đang kiểm tra..."
+                  : "Cập nhật lớp học"}
+              </Button>
+            </DialogActions>
+          </Dialog>
 
-              <Grid item xs={12}>
-                <Button
-                  variant="outlined"
-                  color="primary"
-                  startIcon={<Add />}
-                  onClick={addScheduleDay}
-                  sx={{ mt: 1 }}
-                >
-                  Thêm lịch học
-                </Button>
-              </Grid>
-            </Grid>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button
-            onClick={handleCloseEditClassDialog}
-            disabled={isSubmittingEdit}
+          {/* Dialog Ghi chú */}
+          <Dialog
+            open={openNotesDialog}
+            onClose={handleCloseNotesDialog}
+            maxWidth="sm"
+            fullWidth
           >
-            Hủy
-          </Button>
-          <Button
-            onClick={handleUpdateClass}
-            variant="contained"
-            color="primary"
-            disabled={isSubmittingEdit}
-            startIcon={
-              isSubmittingEdit ? <CircularProgress size={20} /> : <Edit />
-            }
-          >
-            {isSubmittingEdit ? "Đang cập nhật..." : "Cập nhật lớp học"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+            <DialogTitle sx={{ pb: 1 }}>
+              {currentSessionForNotes?.notes
+                ? "Xem/Sửa ghi chú"
+                : "Thêm ghi chú"}
+            </DialogTitle>
+            <DialogContent dividers sx={{ pt: "16px !important" }}>
+              <TextField
+                fullWidth
+                multiline
+                rows={5}
+                label="Nội dung ghi chú"
+                value={notesText}
+                onChange={(e) => setNotesText(e.target.value)}
+                placeholder="Nhập nội dung ghi chú cho buổi học..."
+                variant="outlined"
+              />
+            </DialogContent>
+            <DialogActions sx={{ p: 2, justifyContent: "space-between" }}>
+              <Button
+                onClick={handleCloseNotesDialog}
+                color="inherit"
+                variant="outlined"
+              >
+                Hủy
+              </Button>
+              <Button
+                onClick={handleSaveNotes}
+                color="primary"
+                variant="contained"
+                disabled={isSavingNotes}
+              >
+                {isSavingNotes ? <CircularProgress size={20} /> : "Lưu ghi chú"}
+              </Button>
+            </DialogActions>
+          </Dialog>
+        </>
+      )}
     </Box>
   );
 };

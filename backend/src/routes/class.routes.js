@@ -25,7 +25,7 @@ router.get("/main/:id", protect, classController.getMainClassById);
 router.post(
   "/main",
   protect,
-  authorize(["admin"]),
+  authorize(["admin", "teacher"]),
   classController.createMainClass
 );
 
@@ -41,8 +41,16 @@ router.put(
 router.delete(
   "/main/:id",
   protect,
-  authorize(["admin"]),
+  authorize(["admin", "teacher"]),
   classController.deleteMainClass
+);
+
+// Xóa sinh viên khỏi lớp chính
+router.delete(
+  "/main/:id/students/:studentId",
+  protect,
+  authorize(["admin", "teacher"]),
+  classController.removeStudentFromMainClass
 );
 
 // =================== CLASS COMMON ROUTES ===================
@@ -78,6 +86,13 @@ router.get(
 // Lấy lớp giảng dạy theo ID
 router.get("/teaching/:id", protect, classController.getTeachingClassById);
 
+// Kiểm tra xung đột lịch học
+router.post(
+  "/teaching/check-conflicts",
+  protect,
+  classController.checkScheduleConflicts
+);
+
 // Tạo lớp giảng dạy mới
 router.post(
   "/teaching",
@@ -106,7 +121,7 @@ router.post(
 router.delete(
   "/teaching/:id",
   protect,
-  authorize(["admin"]),
+  authorize(["admin", "teacher"]),
   classController.deleteTeachingClass
 );
 

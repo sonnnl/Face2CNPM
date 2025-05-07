@@ -60,9 +60,29 @@ import {
   AccessTime,
   Check,
   Close,
+  Group,
+  DeleteForever,
 } from "@mui/icons-material";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+
+// Helper function to determine course status
+const getCourseStatus = (startDate, endDate) => {
+  const now = new Date();
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  // Adjust end date to be the end of the day
+  end.setHours(23, 59, 59, 999);
+
+  if (now < start) {
+    return { text: "Chưa bắt đầu", color: "primary", variant: "outlined" };
+  } else if (now >= start && now <= end) {
+    return { text: "Đang học", color: "success", variant: "outlined" };
+  } else {
+    return { text: "Đã kết thúc", color: "default", variant: "outlined" };
+  }
+};
 
 const ClassesPage = () => {
   const dispatch = useDispatch();
@@ -165,12 +185,25 @@ const ClassesPage = () => {
       studentId: null,
       reason: "",
     },
+    studentToDeleteFromMainClass: null, // For main class student deletion
+    confirmDeleteMainClassStudentDialogOpen: false, // For main class student deletion
   });
+
+  // State for viewing students of a teaching class
+  const [viewTeachingClassStudentsDialog, setViewTeachingClassStudentsDialog] =
+    useState({
+      open: false,
+      classItem: null,
+      students: [],
+      loading: false,
+      studentToDelete: null,
+      confirmDeleteDialogOpen: false,
+    });
 
   // Load data on mount and when pagination/search changes
   useEffect(() => {
     loadClasses();
-  }, [page, rowsPerPage, tabValue]);
+  }, [page, rowsPerPage, tabValue, filterOptions]);
 
   useEffect(() => {
     loadLookupData();
@@ -307,10 +340,11 @@ const ClassesPage = () => {
   // Thêm hàm xử lý lọc
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
-    setFilterOptions({
-      ...filterOptions,
+    setPage(0); // Reset page when filter changes
+    setFilterOptions((prevOptions) => ({
+      ...prevOptions,
       [name]: value,
-    });
+    }));
   };
 
   // Thêm hàm áp dụng bộ lọc
@@ -321,15 +355,15 @@ const ClassesPage = () => {
 
   // Thêm hàm xóa bộ lọc
   const clearFilters = () => {
+    setPage(0); // Reset page first
     setFilterOptions({
+      // This will trigger the useEffect
       department: "",
       teacher: "",
       course: "",
       semester: "",
     });
-    setSearchTerm("");
-    setPage(0);
-    loadClasses();
+    setSearchTerm(""); // This is for the separate search input, keep it.
   };
 
   // Dialog handlers
@@ -426,6 +460,30 @@ const ClassesPage = () => {
           [name]: false,
         },
       });
+    }
+
+    // Nếu đang thay đổi học kỳ, hiển thị thông tin về thời gian học kỳ
+    if (name === "semester_id" && value) {
+      // Tìm học kỳ được chọn
+      const selectedSemester = semesters.find((sem) => sem._id === value);
+
+      if (selectedSemester) {
+        // Định dạng ngày để hiển thị
+        const formatDate = (dateString) => {
+          const date = new Date(dateString);
+          return date.toLocaleDateString("vi-VN");
+        };
+
+        // Hiển thị thông báo về thời gian học kỳ
+        enqueueSnackbar(
+          `Lưu ý: Thời gian khóa học phải nằm trong khoảng thời gian của học kỳ ${
+            selectedSemester.name
+          }: từ ${formatDate(selectedSemester.start_date)} đến ${formatDate(
+            selectedSemester.end_date
+          )}`,
+          { variant: "info", autoHideDuration: 10000 }
+        );
+      }
     }
   };
 
@@ -575,7 +633,7 @@ const ClassesPage = () => {
         open: true,
         classItem: classItem,
         pendingStudents: pendingResponse.data.data || [],
-        approvedStudents: approvedResponse.data.data || [],
+        approvedStudents: approvedResponse.data.data?.students || [],
         loading: false,
       });
     } catch (error) {
@@ -590,19 +648,22 @@ const ClassesPage = () => {
 
   // Đóng hộp thoại quản lý sinh viên
   const closeStudentApproval = () => {
-    setStudentApprovalDialog({
+    setStudentApprovalDialog((prevState) => ({
+      ...prevState,
       open: false,
       classItem: null,
-      tabValue: 0,
-      pendingStudents: [],
-      approvedStudents: [],
+      // tabValue: 0, // Keep current tab or reset as needed
+      // pendingStudents: [], // Don't clear if re-opening same class dialog
+      // approvedStudents: [],
       loading: false,
       rejectDialog: {
         open: false,
         studentId: null,
         reason: "",
       },
-    });
+      studentToDeleteFromMainClass: null,
+      confirmDeleteMainClassStudentDialogOpen: false,
+    }));
   };
 
   // Xử lý thay đổi tab trong quản lý sinh viên
@@ -795,6 +856,170 @@ const ClassesPage = () => {
     }
   };
 
+  // Handlers for viewing teaching class students dialog
+  const handleOpenViewTeachingClassStudentsDialog = async (classItem) => {
+    setViewTeachingClassStudentsDialog({
+      open: true,
+      classItem,
+      students: [],
+      loading: true,
+      studentToDelete: null,
+      confirmDeleteDialogOpen: false,
+    });
+    try {
+      const response = await axios.get(
+        `${API_URL}/classes/teaching/${classItem._id}/students`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      setViewTeachingClassStudentsDialog({
+        open: true,
+        classItem,
+        students: response.data.data || [],
+        loading: false,
+        studentToDelete: null,
+        confirmDeleteDialogOpen: false,
+      });
+    } catch (error) {
+      console.error("Lỗi khi tải danh sách sinh viên lớp giảng dạy:", error);
+      enqueueSnackbar(
+        error.response?.data?.message || "Lỗi khi tải danh sách sinh viên",
+        { variant: "error" }
+      );
+      setViewTeachingClassStudentsDialog({
+        open: true,
+        classItem,
+        students: [],
+        loading: false,
+        studentToDelete: null,
+        confirmDeleteDialogOpen: false,
+      });
+    }
+  };
+
+  const handleCloseViewTeachingClassStudentsDialog = () => {
+    setViewTeachingClassStudentsDialog({
+      open: false,
+      classItem: null,
+      students: [],
+      loading: false,
+      studentToDelete: null,
+      confirmDeleteDialogOpen: false,
+    });
+  };
+
+  const handleOpenConfirmDeleteStudentDialog = (student) => {
+    setViewTeachingClassStudentsDialog((prevState) => ({
+      ...prevState,
+      studentToDelete: student,
+      confirmDeleteDialogOpen: true,
+    }));
+  };
+
+  const handleCloseConfirmDeleteStudentDialog = () => {
+    setViewTeachingClassStudentsDialog((prevState) => ({
+      ...prevState,
+      studentToDelete: null,
+      confirmDeleteDialogOpen: false,
+    }));
+  };
+
+  const handleDeleteStudentFromTeachingClass = async () => {
+    if (
+      !viewTeachingClassStudentsDialog.classItem ||
+      !viewTeachingClassStudentsDialog.studentToDelete
+    )
+      return;
+
+    const classId = viewTeachingClassStudentsDialog.classItem._id;
+    const studentId = viewTeachingClassStudentsDialog.studentToDelete._id;
+
+    try {
+      await axios.delete(
+        `${API_URL}/classes/teaching/${classId}/students/${studentId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      enqueueSnackbar("Xóa sinh viên khỏi lớp thành công", {
+        variant: "success",
+      });
+      // Refresh student list in dialog
+      setViewTeachingClassStudentsDialog((prevState) => ({
+        ...prevState,
+        students: prevState.students.filter((s) => s._id !== studentId),
+        studentToDelete: null,
+        confirmDeleteDialogOpen: false,
+      }));
+      // Optionally, reload all classes if student count on the main table needs update
+      // loadClasses();
+    } catch (error) {
+      console.error("Lỗi khi xóa sinh viên:", error);
+      enqueueSnackbar(
+        error.response?.data?.message || "Lỗi khi xóa sinh viên",
+        { variant: "error" }
+      );
+      handleCloseConfirmDeleteStudentDialog();
+    }
+  };
+
+  const handleOpenConfirmDeleteMainClassStudentDialog = (student) => {
+    setStudentApprovalDialog((prevState) => ({
+      ...prevState,
+      studentToDeleteFromMainClass: student,
+      confirmDeleteMainClassStudentDialogOpen: true,
+    }));
+  };
+
+  const handleCloseConfirmDeleteMainClassStudentDialog = () => {
+    setStudentApprovalDialog((prevState) => ({
+      ...prevState,
+      studentToDeleteFromMainClass: null,
+      confirmDeleteMainClassStudentDialogOpen: false,
+    }));
+  };
+
+  const handleDeleteStudentFromMainClass = async () => {
+    if (
+      !studentApprovalDialog.classItem ||
+      !studentApprovalDialog.studentToDeleteFromMainClass
+    )
+      return;
+
+    const classId = studentApprovalDialog.classItem._id;
+    const studentId = studentApprovalDialog.studentToDeleteFromMainClass._id;
+
+    try {
+      await axios.delete(
+        `${API_URL}/classes/main/${classId}/students/${studentId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      enqueueSnackbar("Xóa sinh viên khỏi lớp chính thành công", {
+        variant: "success",
+      });
+      setStudentApprovalDialog((prevState) => ({
+        ...prevState,
+        approvedStudents: prevState.approvedStudents.filter(
+          (s) => s._id !== studentId
+        ),
+        studentToDeleteFromMainClass: null,
+        confirmDeleteMainClassStudentDialogOpen: false,
+      }));
+      // Optionally, reload main classes if student count on the main table needs update
+      // loadClasses();
+    } catch (error) {
+      console.error("Lỗi khi xóa sinh viên khỏi lớp chính:", error);
+      enqueueSnackbar(
+        error.response?.data?.message || "Lỗi khi xóa sinh viên khỏi lớp chính",
+        { variant: "error" }
+      );
+      handleCloseConfirmDeleteMainClassStudentDialog();
+    }
+  };
+
   // Render main class table
   const renderMainClassesTable = () => (
     <TableContainer component={Paper} sx={{ boxShadow: 2 }}>
@@ -926,7 +1151,7 @@ const ClassesPage = () => {
                         <Delete fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                    <Tooltip title="Quản lý sinh viên">
+                    <Tooltip title="Quản lý sinh viên Lớp Chính">
                       <IconButton
                         color="info"
                         onClick={() => openStudentApproval(classItem)}
@@ -973,7 +1198,6 @@ const ClassesPage = () => {
             <TableCell align="center" sx={{ fontWeight: "bold" }}>
               Số lượng SV
             </TableCell>
-            <TableCell sx={{ fontWeight: "bold" }}>Trạng thái</TableCell>
             <TableCell align="right" sx={{ fontWeight: "bold" }}>
               Hành động
             </TableCell>
@@ -982,7 +1206,7 @@ const ClassesPage = () => {
         <TableBody>
           {isLoading ? (
             <TableRow>
-              <TableCell colSpan={7} align="center">
+              <TableCell colSpan={6} align="center">
                 <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}>
                   <CircularProgress size={30} />
                 </Box>
@@ -990,7 +1214,7 @@ const ClassesPage = () => {
             </TableRow>
           ) : classes.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={7} align="center">
+              <TableCell colSpan={6} align="center">
                 <Box sx={{ py: 3 }}>
                   <Typography color="textSecondary">
                     Không tìm thấy lớp học nào
@@ -1096,30 +1320,6 @@ const ClassesPage = () => {
                     size="small"
                   />
                 </TableCell>
-                <TableCell>
-                  {classItem.status === "đang học" ? (
-                    <Chip
-                      label="Đang học"
-                      size="small"
-                      color="success"
-                      variant="outlined"
-                    />
-                  ) : classItem.status === "đã kết thúc" ? (
-                    <Chip
-                      label="Đã kết thúc"
-                      size="small"
-                      color="default"
-                      variant="outlined"
-                    />
-                  ) : (
-                    <Chip
-                      label="Chưa bắt đầu"
-                      size="small"
-                      color="primary"
-                      variant="outlined"
-                    />
-                  )}
-                </TableCell>
                 <TableCell align="right">
                   <Box display="flex" justifyContent="flex-end">
                     <Tooltip title="Sửa lớp">
@@ -1140,6 +1340,18 @@ const ClassesPage = () => {
                         sx={{ mx: 0.5 }}
                       >
                         <Delete fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Xem Sinh viên Lớp Giảng Dạy">
+                      <IconButton
+                        color="secondary"
+                        onClick={() =>
+                          handleOpenViewTeachingClassStudentsDialog(classItem)
+                        }
+                        size="small"
+                        sx={{ mx: 0.5 }}
+                      >
+                        <Group fontSize="small" />
                       </IconButton>
                     </Tooltip>
                   </Box>
@@ -1320,8 +1532,16 @@ const ClassesPage = () => {
           </Grid>
         </Grid>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={() => setDialogOpen(false)}>Hủy</Button>
+      <DialogActions
+        sx={{ p: 2, justifyContent: "space-between", bgcolor: "grey.50" }}
+      >
+        <Button
+          onClick={() => setDialogOpen(false)}
+          variant="outlined"
+          color="inherit"
+        >
+          Hủy
+        </Button>
         <Button
           onClick={handleFormSubmit}
           variant="contained"
@@ -1445,13 +1665,14 @@ const ClassesPage = () => {
               required
               error={formErrors.teaching.semester_id}
             >
-              <InputLabel>Kỳ học</InputLabel>
+              <InputLabel>Học kỳ</InputLabel>
               <Select
-                name="semester_id"
+                name="semester"
                 value={teachingClassForm.semester_id}
                 onChange={handleTeachingClassFormChange}
-                label="Kỳ học"
+                label="Học kỳ"
               >
+                <MenuItem value="">Tất cả</MenuItem>
                 {semesters.map((semester) => (
                   <MenuItem key={semester._id} value={semester._id}>
                     {semester.name} ({semester.year})
@@ -1459,8 +1680,29 @@ const ClassesPage = () => {
                 ))}
               </Select>
               {formErrors.teaching.semester_id && (
-                <FormHelperText>Vui lòng chọn kỳ học</FormHelperText>
+                <FormHelperText>Vui lòng chọn học kỳ</FormHelperText>
               )}
+              {!formErrors.teaching.semester_id &&
+                teachingClassForm.semester_id &&
+                (() => {
+                  const selectedSemester = semesters.find(
+                    (sem) => sem._id === teachingClassForm.semester_id
+                  );
+                  if (selectedSemester) {
+                    const formatDate = (dateString) => {
+                      const date = new Date(dateString);
+                      return date.toLocaleDateString("vi-VN");
+                    };
+                    return (
+                      <FormHelperText>
+                        Lưu ý: Thời gian học kỳ:{" "}
+                        {formatDate(selectedSemester.start_date)} -{" "}
+                        {formatDate(selectedSemester.end_date)}
+                      </FormHelperText>
+                    );
+                  }
+                  return null;
+                })()}
             </FormControl>
           </Grid>
           <Grid item xs={12} sm={12}>
@@ -1568,8 +1810,16 @@ const ClassesPage = () => {
           </Grid>
         </Grid>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={() => setDialogOpen(false)}>Hủy</Button>
+      <DialogActions
+        sx={{ p: 2, justifyContent: "space-between", bgcolor: "grey.50" }}
+      >
+        <Button
+          onClick={() => setDialogOpen(false)}
+          variant="outlined"
+          color="inherit"
+        >
+          Hủy
+        </Button>
         <Button
           onClick={handleFormSubmit}
           variant="contained"
@@ -1751,6 +2001,395 @@ const ClassesPage = () => {
     </Box>
   );
 
+  // Render dialog for viewing teaching class students
+  const renderViewTeachingClassStudentsDialog = () => (
+    <>
+      <Dialog
+        open={viewTeachingClassStudentsDialog.open}
+        onClose={handleCloseViewTeachingClassStudentsDialog}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          Danh sách sinh viên -{" "}
+          {viewTeachingClassStudentsDialog.classItem?.class_name}
+        </DialogTitle>
+        <DialogContent>
+          {viewTeachingClassStudentsDialog.loading ? (
+            <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : viewTeachingClassStudentsDialog.students.length === 0 ? (
+            <Alert severity="info">Lớp này chưa có sinh viên nào.</Alert>
+          ) : (
+            <TableContainer component={Paper} sx={{ mt: 2 }}>
+              <Table stickyHeader size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>STT</TableCell>
+                    <TableCell>Họ tên</TableCell>
+                    <TableCell>MSSV</TableCell>
+                    <TableCell>Email</TableCell>
+                    <TableCell align="center">Hành động</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {viewTeachingClassStudentsDialog.students.map(
+                    (student, index) => (
+                      <TableRow key={student._id} hover>
+                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{student.full_name}</TableCell>
+                        <TableCell>
+                          {student.school_info?.student_id || "N/A"}
+                        </TableCell>
+                        <TableCell>{student.email}</TableCell>
+                        <TableCell align="center">
+                          <Tooltip title="Xóa sinh viên này khỏi lớp">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() =>
+                                handleOpenConfirmDeleteStudentDialog(student)
+                              }
+                            >
+                              <DeleteForever fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={handleCloseViewTeachingClassStudentsDialog}
+            color="primary"
+          >
+            Đóng
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirmation Dialog for deleting student from teaching class */}
+      <Dialog
+        open={viewTeachingClassStudentsDialog.confirmDeleteDialogOpen}
+        onClose={handleCloseConfirmDeleteStudentDialog}
+        maxWidth="xs"
+      >
+        <DialogTitle>Xác nhận xóa sinh viên</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {`Bạn có chắc chắn muốn xóa sinh viên `}
+            <strong>
+              {viewTeachingClassStudentsDialog.studentToDelete?.full_name}
+            </strong>
+            {` (MSSV: `}
+            <strong>
+              {viewTeachingClassStudentsDialog.studentToDelete?.school_info
+                ?.student_id || "N/A"}
+            </strong>
+            {`) khỏi lớp này không? Tất cả dữ liệu điểm danh và điểm số liên quan của sinh viên này trong lớp sẽ bị xóa.`}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={handleCloseConfirmDeleteStudentDialog}
+            color="inherit"
+          >
+            Hủy
+          </Button>
+          <Button
+            onClick={handleDeleteStudentFromTeachingClass}
+            color="error"
+            autoFocus
+          >
+            Xóa
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+
+  // Render dialog for viewing students of a main class (studentApprovalDialog)
+  const renderViewMainClassStudentsDialog = () => (
+    <>
+      <Dialog
+        open={studentApprovalDialog.open}
+        onClose={closeStudentApproval}
+        maxWidth="lg" // Changed from md to lg for more space
+        fullWidth
+      >
+        <DialogTitle>
+          Quản lý sinh viên - {studentApprovalDialog.classItem?.name}
+        </DialogTitle>
+        <DialogContent>
+          {studentApprovalDialog.loading ? (
+            <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <Box sx={{ width: "100%" }}>
+              <Tabs
+                value={studentApprovalDialog.tabValue}
+                onChange={handleApprovalTabChange}
+                indicatorColor="primary"
+                textColor="primary"
+                centered
+              >
+                <Tab
+                  label={
+                    <Box sx={{ display: "flex", alignItems: "center" }}>
+                      <AccessTime sx={{ mr: 1 }} />
+                      Sinh viên chờ duyệt{" "}
+                      {studentApprovalDialog.pendingStudents.length > 0 && (
+                        <Chip
+                          label={studentApprovalDialog.pendingStudents.length}
+                          color="error"
+                          size="small"
+                          sx={{ ml: 1 }}
+                        />
+                      )}
+                    </Box>
+                  }
+                />
+                <Tab
+                  label={
+                    <Box sx={{ display: "flex", alignItems: "center" }}>
+                      <School sx={{ mr: 1 }} />
+                      Sinh viên của lớp
+                    </Box>
+                  }
+                />
+              </Tabs>
+
+              <Box sx={{ p: 2 }}>
+                {studentApprovalDialog.tabValue === 0 && ( // Pending Students Tab
+                  <>
+                    {studentApprovalDialog.pendingStudents.length === 0 ? (
+                      <Alert severity="info">
+                        Không có sinh viên nào đang chờ phê duyệt
+                      </Alert>
+                    ) : (
+                      <List>
+                        {studentApprovalDialog.pendingStudents.map(
+                          (student) => (
+                            <ListItem
+                              key={student._id}
+                              sx={{
+                                mb: 1,
+                                border: "1px solid #e0e0e0",
+                                borderRadius: 1,
+                              }}
+                            >
+                              <ListItemAvatar>
+                                <Avatar src={student.avatar_url}>
+                                  {student.full_name.charAt(0).toUpperCase()}
+                                </Avatar>
+                              </ListItemAvatar>
+                              <ListItemText
+                                primary={
+                                  <Box
+                                    sx={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                    }}
+                                  >
+                                    {student.full_name}
+                                    <Chip
+                                      label="Chờ duyệt"
+                                      color="warning"
+                                      size="small"
+                                      sx={{ ml: 1 }}
+                                    />
+                                  </Box>
+                                }
+                                secondary={
+                                  <>
+                                    <Typography variant="body2">
+                                      Email: {student.email}
+                                    </Typography>
+                                    <Typography variant="body2">
+                                      MSSV:{" "}
+                                      {student.school_info?.student_id ||
+                                        "Chưa có mã SV"}
+                                    </Typography>
+                                    <Typography variant="body2">
+                                      Ngày đăng ký:{" "}
+                                      {new Date(
+                                        student.created_at
+                                      ).toLocaleDateString("vi-VN")}
+                                    </Typography>
+                                  </>
+                                }
+                              />
+                              <ListItemSecondaryAction>
+                                <Tooltip title="Phê duyệt">
+                                  <IconButton
+                                    edge="end"
+                                    color="success"
+                                    onClick={() =>
+                                      handleApproveStudent(student._id)
+                                    }
+                                  >
+                                    <Check />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Từ chối">
+                                  <IconButton
+                                    edge="end"
+                                    color="error"
+                                    onClick={() =>
+                                      openRejectDialog(student._id)
+                                    }
+                                    sx={{ ml: 0.5 }} // Reduced margin
+                                  >
+                                    <Close />
+                                  </IconButton>
+                                </Tooltip>
+                              </ListItemSecondaryAction>
+                            </ListItem>
+                          )
+                        )}
+                      </List>
+                    )}
+                  </>
+                )}
+
+                {studentApprovalDialog.tabValue === 1 && ( // Approved Students Tab
+                  <>
+                    {studentApprovalDialog.approvedStudents.length === 0 ? (
+                      <Alert severity="info">
+                        Chưa có sinh viên nào trong lớp
+                      </Alert>
+                    ) : (
+                      <TableContainer component={Paper} sx={{ mt: 1 }}>
+                        <Table stickyHeader size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ width: "5%" }}>STT</TableCell>
+                              <TableCell sx={{ width: "30%" }}>
+                                Họ tên
+                              </TableCell>
+                              <TableCell sx={{ width: "20%" }}>MSSV</TableCell>
+                              <TableCell sx={{ width: "30%" }}>Email</TableCell>
+                              <TableCell align="center" sx={{ width: "15%" }}>
+                                Hành động
+                              </TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {studentApprovalDialog.approvedStudents.map(
+                              (student, index) => (
+                                <TableRow key={student._id} hover>
+                                  <TableCell>{index + 1}</TableCell>
+                                  <TableCell>{student.full_name}</TableCell>
+                                  <TableCell>
+                                    {student.school_info?.student_id || "N/A"}
+                                  </TableCell>
+                                  <TableCell>{student.email}</TableCell>
+                                  <TableCell align="center">
+                                    <Tooltip title="Xóa sinh viên này khỏi lớp chính">
+                                      <IconButton
+                                        size="small"
+                                        color="error"
+                                        onClick={() =>
+                                          handleOpenConfirmDeleteMainClassStudentDialog(
+                                            student
+                                          )
+                                        }
+                                      >
+                                        <DeleteForever fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            )}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    )}
+                  </>
+                )}
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeStudentApproval} color="primary">
+            Đóng
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirmation Dialog for deleting student from main class */}
+      <Dialog
+        open={studentApprovalDialog.confirmDeleteMainClassStudentDialogOpen}
+        onClose={handleCloseConfirmDeleteMainClassStudentDialog}
+        maxWidth="xs"
+      >
+        <DialogTitle>Xác nhận xóa sinh viên khỏi lớp chính</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {`Bạn có chắc chắn muốn xóa sinh viên `}
+            <strong>
+              {studentApprovalDialog.studentToDeleteFromMainClass?.full_name}
+            </strong>
+            {` (MSSV: `}
+            <strong>
+              {studentApprovalDialog.studentToDeleteFromMainClass?.school_info
+                ?.student_id || "N/A"}
+            </strong>
+            {`) khỏi lớp chính này? Sinh viên sẽ bị gỡ khỏi lớp và các thông báo liên quan đến việc duyệt vào lớp này có thể bị xóa.`}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={handleCloseConfirmDeleteMainClassStudentDialog}
+            color="inherit"
+          >
+            Hủy
+          </Button>
+          <Button
+            onClick={handleDeleteStudentFromMainClass}
+            color="error"
+            autoFocus
+          >
+            Xóa
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dialog từ chối sinh viên */}
+      <Dialog
+        open={studentApprovalDialog.rejectDialog.open}
+        onClose={closeRejectDialog}
+        maxWidth="xs"
+      >
+        <DialogTitle>Từ chối sinh viên</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {`Bạn có chắc chắn muốn từ chối sinh viên `}
+            <strong>{studentApprovalDialog.rejectDialog.studentId}</strong>
+            {` không?`}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeRejectDialog} color="primary">
+            Hủy
+          </Button>
+          <Button onClick={handleRejectStudent} color="error" autoFocus>
+            Xóa
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+
   return (
     <Box>
       <Typography variant="h5" gutterBottom>
@@ -1918,36 +2557,25 @@ const ClassesPage = () => {
                     </FormControl>
                   </Grid>
                   <Grid item xs={12} sm={6} md={3}>
-                    <TextField
-                      fullWidth
-                      size="small"
-                      label="Học kỳ"
-                      name="semester"
-                      value={filterOptions.semester}
-                      onChange={handleFilterChange}
-                    />
+                    <FormControl fullWidth size="small">
+                      <InputLabel>Học kỳ</InputLabel>
+                      <Select
+                        name="semester"
+                        value={filterOptions.semester}
+                        onChange={handleFilterChange}
+                        label="Học kỳ"
+                      >
+                        <MenuItem value="">Tất cả</MenuItem>
+                        {semesters.map((semester) => (
+                          <MenuItem key={semester._id} value={semester._id}>
+                            {semester.name} ({semester.year})
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
                   </Grid>
                 </>
               )}
-              <Grid item xs={12} sm={6} md={3}>
-                <Box display="flex" gap={1}>
-                  <Button
-                    variant="outlined"
-                    color="primary"
-                    fullWidth
-                    onClick={applyFilters}
-                  >
-                    Áp dụng
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    color="inherit"
-                    onClick={clearFilters}
-                  >
-                    Xóa lọc
-                  </Button>
-                </Box>
-              </Grid>
             </Grid>
           </Box>
         </Collapse>
@@ -1976,6 +2604,12 @@ const ClassesPage = () => {
         ? renderMainClassFormDialog()
         : renderTeachingClassFormDialog()}
 
+      {/* Dialog xem sinh viên lớp giảng dạy */}
+      {renderViewTeachingClassStudentsDialog()}
+
+      {/* Dialog xem sinh viên lớp chính */}
+      {renderViewMainClassStudentsDialog()}
+
       {/* Dialog xác nhận xóa */}
       <Dialog
         open={deleteDialog.open}
@@ -2001,240 +2635,6 @@ const ClassesPage = () => {
           </Button>
         </DialogActions>
       </Dialog>
-
-      {/* Dialog quản lý sinh viên */}
-      <Dialog
-        open={studentApprovalDialog.open}
-        onClose={closeStudentApproval}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>
-          Quản lý sinh viên - {studentApprovalDialog.classItem?.name}
-        </DialogTitle>
-        <DialogContent>
-          {studentApprovalDialog.loading ? (
-            <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}>
-              <CircularProgress />
-            </Box>
-          ) : (
-            <Box sx={{ width: "100%" }}>
-              <Tabs
-                value={studentApprovalDialog.tabValue}
-                onChange={handleApprovalTabChange}
-                indicatorColor="primary"
-                textColor="primary"
-                centered
-              >
-                <Tab
-                  label={
-                    <Box sx={{ display: "flex", alignItems: "center" }}>
-                      <AccessTime sx={{ mr: 1 }} />
-                      Sinh viên chờ duyệt{" "}
-                      {studentApprovalDialog.pendingStudents.length > 0 && (
-                        <Chip
-                          label={studentApprovalDialog.pendingStudents.length}
-                          color="error"
-                          size="small"
-                          sx={{ ml: 1 }}
-                        />
-                      )}
-                    </Box>
-                  }
-                />
-                <Tab
-                  label={
-                    <Box sx={{ display: "flex", alignItems: "center" }}>
-                      <School sx={{ mr: 1 }} />
-                      Sinh viên của lớp
-                    </Box>
-                  }
-                />
-              </Tabs>
-
-              <Box sx={{ p: 2 }}>
-                {studentApprovalDialog.tabValue === 0 && (
-                  <>
-                    {studentApprovalDialog.pendingStudents.length === 0 ? (
-                      <Alert severity="info">
-                        Không có sinh viên nào đang chờ phê duyệt
-                      </Alert>
-                    ) : (
-                      <List>
-                        {studentApprovalDialog.pendingStudents.map(
-                          (student) => (
-                            <ListItem
-                              key={student._id}
-                              sx={{
-                                mb: 1,
-                                border: "1px solid #e0e0e0",
-                                borderRadius: 1,
-                              }}
-                            >
-                              <ListItemAvatar>
-                                <Avatar>
-                                  {student.full_name.charAt(0).toUpperCase()}
-                                </Avatar>
-                              </ListItemAvatar>
-                              <ListItemText
-                                primary={
-                                  <Box
-                                    sx={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                    }}
-                                  >
-                                    {student.full_name}
-                                    <Chip
-                                      label="Chờ duyệt"
-                                      color="warning"
-                                      size="small"
-                                      sx={{ ml: 1 }}
-                                    />
-                                  </Box>
-                                }
-                                secondary={
-                                  <>
-                                    <Typography variant="body2">
-                                      Email: {student.email}
-                                    </Typography>
-                                    <Typography variant="body2">
-                                      MSSV:{" "}
-                                      {student.school_info?.student_id ||
-                                        "Chưa có mã SV"}
-                                    </Typography>
-                                    <Typography variant="body2">
-                                      Ngày đăng ký:{" "}
-                                      {new Date(
-                                        student.created_at
-                                      ).toLocaleDateString()}
-                                    </Typography>
-                                  </>
-                                }
-                              />
-                              <ListItemSecondaryAction>
-                                <IconButton
-                                  edge="end"
-                                  color="success"
-                                  onClick={() =>
-                                    handleApproveStudent(student._id)
-                                  }
-                                  title="Phê duyệt"
-                                >
-                                  <Check />
-                                </IconButton>
-                                <IconButton
-                                  edge="end"
-                                  color="error"
-                                  onClick={() => openRejectDialog(student._id)}
-                                  title="Từ chối"
-                                  sx={{ ml: 1 }}
-                                >
-                                  <Close />
-                                </IconButton>
-                              </ListItemSecondaryAction>
-                            </ListItem>
-                          )
-                        )}
-                      </List>
-                    )}
-                  </>
-                )}
-
-                {studentApprovalDialog.tabValue === 1 && (
-                  <>
-                    {studentApprovalDialog.approvedStudents.length === 0 ? (
-                      <Alert severity="info">
-                        Chưa có sinh viên nào trong lớp
-                      </Alert>
-                    ) : (
-                      <TableContainer>
-                        <Table>
-                          <TableHead>
-                            <TableRow>
-                              <TableCell>Họ tên</TableCell>
-                              <TableCell>MSSV</TableCell>
-                              <TableCell>Email</TableCell>
-                              <TableCell>Trạng thái</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {studentApprovalDialog.approvedStudents.map(
-                              (student) => (
-                                <TableRow key={student._id}>
-                                  <TableCell>{student.full_name}</TableCell>
-                                  <TableCell>
-                                    {student.school_info?.student_id ||
-                                      "Chưa có mã SV"}
-                                  </TableCell>
-                                  <TableCell>{student.email}</TableCell>
-                                  <TableCell>
-                                    <Chip
-                                      label="Đã phê duyệt"
-                                      color="success"
-                                      size="small"
-                                    />
-                                  </TableCell>
-                                </TableRow>
-                              )
-                            )}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    )}
-                  </>
-                )}
-              </Box>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={closeStudentApproval} color="primary">
-            Đóng
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Dialog từ chối sinh viên */}
-      {studentApprovalDialog.rejectDialog.open && (
-        <Dialog
-          open={studentApprovalDialog.rejectDialog.open}
-          onClose={closeRejectDialog}
-          maxWidth="sm"
-          fullWidth
-        >
-          <DialogTitle>Từ chối sinh viên</DialogTitle>
-          <DialogContent>
-            <Typography variant="body2" paragraph>
-              Bạn có chắc muốn từ chối sinh viên này?
-            </Typography>
-            <TextField
-              fullWidth
-              multiline
-              rows={3}
-              label="Lý do từ chối"
-              placeholder="Nhập lý do từ chối để thông báo cho sinh viên"
-              value={studentApprovalDialog.rejectDialog.reason}
-              onChange={handleRejectReasonChange}
-              variant="outlined"
-              sx={{ mt: 2 }}
-            />
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={closeRejectDialog} color="inherit">
-              Hủy
-            </Button>
-            <Button
-              onClick={handleRejectStudent}
-              color="error"
-              variant="contained"
-              startIcon={<Close />}
-            >
-              Từ chối
-            </Button>
-          </DialogActions>
-        </Dialog>
-      )}
     </Box>
   );
 };

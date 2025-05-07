@@ -183,7 +183,9 @@ exports.createSemester = async (req, res) => {
       end_date,
       year,
       semester_number: semester_number || 1,
-      academic_year: academic_year || `${year}-${year + 1}`,
+      academic_year:
+        academic_year ||
+        getAcademicYearByDate(end_date, year, semester_number || 1),
       is_current: is_current || false,
       status: status || "chưa bắt đầu",
       registration_start_date: regStartDate,
@@ -204,6 +206,24 @@ exports.createSemester = async (req, res) => {
     });
   }
 };
+
+// Thêm hàm helper để tính toán năm học dựa vào ngày kết thúc và semester_number
+function getAcademicYearByDate(endDateStr, year, semesterNumber = null) {
+  if (!endDateStr || !year) return `${year}-${year + 1}`;
+
+  const endDate = new Date(endDateStr);
+  const endMonth = endDate.getMonth() + 1; // getMonth() trả về 0-11
+
+  // Nếu tháng kết thúc < 9 (trước tháng 9), thì năm học là (year-1)-year
+  // Tương ứng với học kỳ 2 (tháng 1-6) và học kỳ hè (tháng 7-8)
+  if (endMonth < 9) {
+    return `${year - 1}-${year}`;
+  } else {
+    // Ngược lại năm học là year-(year+1)
+    // Tương ứng với học kỳ 1 (tháng 9-12)
+    return `${year}-${year + 1}`;
+  }
+}
 
 // @desc    Cập nhật học kỳ
 // @route   PUT /api/semesters/:id
@@ -263,7 +283,15 @@ exports.updateSemester = async (req, res) => {
     };
 
     if (semester_number) updateData.semester_number = semester_number;
-    if (academic_year) updateData.academic_year = academic_year;
+    if (academic_year) {
+      updateData.academic_year = academic_year;
+    } else if (end_date && year) {
+      updateData.academic_year = getAcademicYearByDate(
+        end_date,
+        year,
+        semester_number
+      );
+    }
 
     const semester = await Semester.findByIdAndUpdate(semesterId, updateData, {
       new: true,

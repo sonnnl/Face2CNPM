@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import axiosInstance from "../utils/axios";
 import {
   Box,
   Typography,
@@ -78,9 +78,8 @@ const DashboardPage = () => {
             // Sửa endpoint để sử dụng đúng API cho sinh viên
             // Thay vì /classes/teaching?student=${user._id} sai đường dẫn
             // Dùng /classes/teaching/student/${user._id} đúng định nghĩa route
-            const classesResponse = await axios.get(
-              `${API_URL}/classes/teaching/student/${user._id}`,
-              { headers: { Authorization: `Bearer ${token}` } }
+            const classesResponse = await axiosInstance.get(
+              `/classes/teaching/student/${user._id}`
             );
             classesData = classesResponse.data.data || [];
           } catch (error) {
@@ -89,9 +88,8 @@ const DashboardPage = () => {
 
           try {
             // Lấy thống kê điểm danh
-            const scoresResponse = await axios.get(
-              `${API_URL}/attendance/student/${user._id}/scores`,
-              { headers: { Authorization: `Bearer ${token}` } }
+            const scoresResponse = await axiosInstance.get(
+              `/attendance/student/${user._id}/scores`
             );
             scoresData = scoresResponse.data.data || [];
           } catch (error) {
@@ -100,9 +98,8 @@ const DashboardPage = () => {
 
           try {
             // Lấy lịch sử điểm danh gần đây
-            const logsResponse = await axios.get(
-              `${API_URL}/attendance/student/${user._id}/logs?limit=10`,
-              { headers: { Authorization: `Bearer ${token}` } }
+            const logsResponse = await axiosInstance.get(
+              `/attendance/student/${user._id}/logs?limit=10`
             );
             logsData = logsResponse.data.data || [];
           } catch (error) {
@@ -198,19 +195,13 @@ const DashboardPage = () => {
           // Dữ liệu cho giáo viên
 
           // Lấy các lớp do giáo viên dạy
-          const classesResponse = await axios.get(
-            `${API_URL}/classes/teaching/teacher/${user._id}`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
+          const classesResponse = await axiosInstance.get(
+            `/classes/teaching/teacher/${user._id}`
           );
 
           // Lấy các phiên điểm danh gần đây
-          const sessionsResponse = await axios.get(
-            `${API_URL}/attendance/sessions?teacher=${user._id}&limit=5`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
+          const sessionsResponse = await axiosInstance.get(
+            `/attendance/sessions?teacher=${user._id}&limit=5`
           );
 
           // Lọc phiên điểm danh hôm nay
@@ -235,30 +226,22 @@ const DashboardPage = () => {
           // Dữ liệu cho admin
 
           // Lấy tổng số lớp học
-          const classesResponse = await axios.get(
-            `${API_URL}/classes/teaching?limit=5`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
+          const adminClassesResponse = await axiosInstance.get(
+            `/classes/teaching?limit=5`
           );
 
           // Lấy tổng số người dùng
-          const usersResponse = await axios.get(`${API_URL}/users/stats`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
+          const usersResponse = await axiosInstance.get(`/users/stats`);
 
           // Lấy các phiên điểm danh gần đây
-          const sessionsResponse = await axios.get(
-            `${API_URL}/attendance/sessions?limit=5`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
+          const adminSessionsResponse = await axiosInstance.get(
+            `/attendance/sessions?limit=5`
           );
 
           setStats({
-            classes: classesResponse.data.data || [],
-            attendanceSessions: sessionsResponse.data.data || [],
-            totalClasses: classesResponse.data.totalCount || 0,
+            classes: adminClassesResponse.data.data || [],
+            attendanceSessions: adminSessionsResponse.data.data || [],
+            totalClasses: adminClassesResponse.data.totalCount || 0,
             totalUsers: usersResponse.data.totalUsers || 0,
             totalStudents: usersResponse.data.students || 0,
             totalTeachers: usersResponse.data.teachers || 0,
@@ -957,7 +940,8 @@ const DashboardPage = () => {
             <Box>
               <Typography variant="h5">Xin chào, {user.full_name}!</Typography>
               <Typography variant="body2" color="textSecondary">
-                Mã giảng viên: {user.teacher_code}
+                Mã giảng viên:{" "}
+                {user.school_info?.teacher_code || "Chưa cập nhật"}
               </Typography>
             </Box>
           </Box>

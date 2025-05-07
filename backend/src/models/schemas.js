@@ -191,20 +191,19 @@ const TeachingClassSchema = new Schema({
   students: [{ type: Schema.Types.ObjectId, ref: "User" }],
   total_sessions: { type: Number, required: true },
   semester_id: { type: Schema.Types.ObjectId, ref: "Semester", required: true },
-  room_id: { type: Schema.Types.ObjectId, ref: "Room" },
   course_start_date: { type: Date },
   course_end_date: { type: Date },
   schedule: [
     {
-      day_of_week: { type: Number, required: true }, // 0 = Chủ nhật, 1 = Thứ hai, ...
+      day_of_week: { type: Number, required: true },
       start_period: { type: Number, required: true },
       end_period: { type: Number, required: true },
-      start_time: { type: String, required: true }, // Format "HH:MM"
-      end_time: { type: String, required: true }, // Format "HH:MM"
-      room_id: { type: Schema.Types.ObjectId, ref: "Room" },
+      start_time: { type: String, required: true },
+      end_time: { type: String, required: true },
+      room_id: { type: Schema.Types.ObjectId, ref: "Room", required: true },
       is_recurring: { type: Boolean, default: true },
-      specific_dates: [Date], // Ngày cụ thể nếu không lặp lại hàng tuần
-      excluded_dates: [Date], // Ngày nghỉ/bỏ qua
+      specific_dates: [Date],
+      excluded_dates: [Date],
     },
   ],
   auto_generate_sessions: { type: Boolean, default: true }, // Tự động tạo các buổi học dựa trên lịch

@@ -46,6 +46,9 @@ import {
   OutlinedInput,
   AlertTitle,
   InputAdornment,
+  DialogContentText,
+  CardHeader,
+  ListItemIcon,
 } from "@mui/material";
 import {
   Check,
@@ -71,6 +74,8 @@ import {
   LockPerson,
   SentimentDissatisfied as NoFace,
   Edit,
+  DeleteForever,
+  Group,
 } from "@mui/icons-material";
 import InfoIcon from "@mui/icons-material/Info";
 import RefreshIcon from "@mui/icons-material/Refresh";
@@ -115,6 +120,18 @@ const TeacherMainClassPage = () => {
     studentId: null,
     reason: "",
   });
+
+  // State for confirming student deletion from main class
+  const [confirmDeleteStudentDialog, setConfirmDeleteStudentDialog] = useState({
+    open: false,
+    student: null,
+  });
+
+  // State for confirming main class deletion
+  const [confirmDeleteMainClassDialog, setConfirmDeleteMainClassDialog] =
+    useState({
+      open: false,
+    });
 
   // States cho modal chi tiết sinh viên
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -180,14 +197,14 @@ const TeacherMainClassPage = () => {
         await fetchPendingStudents(classData._id);
         await fetchApprovedStudents(classData._id);
       } else {
-        enqueueSnackbar("Bạn chưa được phân công làm cố vấn cho lớp nào", {
-          variant: "info",
-        });
+        // enqueueSnackbar("Bạn chưa được phân công làm cố vấn cho lớp nào", {
+        //   variant: "info",
+        // });
       }
     } catch (error) {
       console.error("Lỗi khi tải dữ liệu lớp chính:", error);
       setError("Không thể tải thông tin lớp chính. Vui lòng thử lại sau.");
-      enqueueSnackbar("Lỗi khi tải dữ liệu lớp chính", { variant: "error" });
+      // enqueueSnackbar("Lỗi khi tải dữ liệu lớp chính", { variant: "error" });
     } finally {
       setIsLoading(false);
     }
@@ -213,21 +230,21 @@ const TeacherMainClassPage = () => {
           : "Lỗi khi tải danh sách sinh viên chờ duyệt"
         : "Lỗi kết nối đến máy chủ";
 
-      enqueueSnackbar(
-        <div>
-          {errorMessage}
-          {!error.response && (
-            <Button
-              size="small"
-              onClick={() => fetchPendingStudents(mainClassId)}
-              sx={{ mt: 1, display: "block" }}
-              variant="outlined"
-            >
-              Thử lại
-            </Button>
-          )}
-        </div>
-      );
+      // enqueueSnackbar(
+      //   <div>
+      //     {errorMessage}
+      //     {!error.response && (
+      //       <Button
+      //         size="small"
+      //         onClick={() => fetchPendingStudents(mainClassId)}
+      //         sx={{ mt: 1, display: "block" }}
+      //         variant="outlined"
+      //       >
+      //         Thử lại
+      //       </Button>
+      //     )}
+      //   </div>
+      // );
       console.error("Error fetching pending students:", error);
     } finally {
       setIsLoadingPending(false);
@@ -267,7 +284,7 @@ const TeacherMainClassPage = () => {
         errorMessage = error.response.data.message;
       }
 
-      enqueueSnackbar(errorMessage, { variant: "error" });
+      // enqueueSnackbar(errorMessage, { variant: "error" });
     } finally {
       setIsLoadingApproved(false);
     }
@@ -282,7 +299,7 @@ const TeacherMainClassPage = () => {
       setDepartments(response.data.data || []);
     } catch (error) {
       console.error("Lỗi khi tải danh sách khoa:", error);
-      enqueueSnackbar("Không thể tải danh sách khoa", { variant: "error" });
+      // enqueueSnackbar("Không thể tải danh sách khoa", { variant: "error" });
     }
   };
 
@@ -313,17 +330,17 @@ const TeacherMainClassPage = () => {
         }
       );
 
-      enqueueSnackbar("Phê duyệt sinh viên thành công", { variant: "success" });
+      // enqueueSnackbar("Phê duyệt sinh viên thành công", { variant: "success" });
 
       // Cập nhật lại danh sách
       await fetchPendingStudents(mainClass._id);
       await fetchApprovedStudents(mainClass._id);
     } catch (error) {
       console.error("Lỗi khi phê duyệt sinh viên:", error);
-      enqueueSnackbar(
-        error.response?.data?.message || "Lỗi khi phê duyệt sinh viên",
-        { variant: "error" }
-      );
+      // enqueueSnackbar(
+      //   error.response?.data?.message || "Lỗi khi phê duyệt sinh viên",
+      //   { variant: "error" }
+      // );
     }
   };
 
@@ -356,17 +373,17 @@ const TeacherMainClassPage = () => {
         }
       );
 
-      enqueueSnackbar("Đã từ chối sinh viên", { variant: "success" });
+      // enqueueSnackbar("Đã từ chối sinh viên", { variant: "success" });
       closeRejectDialog();
 
       // Cập nhật lại danh sách
       await fetchPendingStudents(mainClass._id);
     } catch (error) {
       console.error("Lỗi khi từ chối sinh viên:", error);
-      enqueueSnackbar(
-        error.response?.data?.message || "Lỗi khi từ chối sinh viên",
-        { variant: "error" }
-      );
+      // enqueueSnackbar(
+      //   error.response?.data?.message || "Lỗi khi từ chối sinh viên",
+      //   { variant: "error" }
+      // );
     }
   };
 
@@ -393,36 +410,17 @@ const TeacherMainClassPage = () => {
 
     return (
       <Card sx={{ mb: 3, boxShadow: 3 }}>
-        <CardContent>
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              mb: 2,
-            }}
-          >
-            <Typography
-              variant="h6"
-              sx={{
-                color: "primary.main",
-                fontWeight: "bold",
-                display: "flex",
-                alignItems: "center",
-              }}
-            >
-              <Class sx={{ mr: 1 }} />
-              Thông tin lớp {mainClass.name}
-            </Typography>
-            <Box sx={{ display: "flex", gap: 1 }}>
-              {mainClasses.length > 1 && (
-                <Chip
-                  icon={<SwapHoriz />}
-                  label={`${mainClasses.length} lớp phụ trách`}
-                  color="info"
-                  variant="outlined"
-                />
-              )}
+        <CardHeader
+          avatar={
+            <Avatar sx={{ bgcolor: "primary.main" }}>
+              <Class />
+            </Avatar>
+          }
+          titleTypographyProps={{ variant: "h6", fontWeight: "bold" }}
+          title={`Lớp Chủ Nhiệm: ${mainClass.name}`}
+          subheader={`Mã: ${mainClass.class_code}`}
+          action={
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
               <Button
                 variant="outlined"
                 color="primary"
@@ -432,96 +430,128 @@ const TeacherMainClassPage = () => {
               >
                 Chỉnh sửa
               </Button>
+              {user &&
+                mainClass &&
+                mainClass.advisor_id &&
+                user._id === mainClass.advisor_id._id && (
+                  <Tooltip title="Xóa Lớp Chủ Nhiệm Này">
+                    <IconButton
+                      color="error"
+                      onClick={handleOpenConfirmDeleteMainClassDialog}
+                      size="small"
+                    >
+                      <DeleteForever />
+                    </IconButton>
+                  </Tooltip>
+                )}
             </Box>
-          </Box>
-          <Grid container spacing={2}>
+          }
+          sx={{ borderBottom: 1, borderColor: "divider" }}
+        />
+        <CardContent>
+          <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <Typography
                 variant="subtitle1"
-                sx={{ color: "primary.main", fontWeight: "bold" }}
+                gutterBottom
+                sx={{ fontWeight: "medium", color: "text.secondary" }}
               >
-                Chi tiết lớp chính
+                Thông tin chi tiết
               </Typography>
-              <Box
-                sx={{
-                  pl: 2,
-                  borderLeft: "4px solid",
-                  borderColor: "primary.main",
-                }}
-              >
-                <Typography variant="body1" sx={{ mb: 1 }}>
-                  <strong>Tên lớp:</strong> {mainClass.name}
-                </Typography>
-                <Typography variant="body1" sx={{ mb: 1 }}>
-                  <strong>Mã lớp:</strong> {mainClass.class_code}
-                </Typography>
-                {mainClass.department_id && (
-                  <Typography variant="body1" sx={{ mb: 1 }}>
-                    <strong>Khoa:</strong> {mainClass.department_id.name}
-                  </Typography>
-                )}
-                <Typography variant="body1" sx={{ mb: 1 }}>
-                  <strong>Tổng số sinh viên:</strong>{" "}
-                  <Chip
-                    label={mainClass.students?.length || 0}
-                    color="primary"
-                    size="small"
-                    sx={{ fontWeight: "bold" }}
+              <List dense disablePadding>
+                <ListItem disableGutters>
+                  <ListItemIcon sx={{ minWidth: 32 }}>
+                    <InfoIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText primary="Tên lớp:" secondary={mainClass.name} />
+                </ListItem>
+                <ListItem disableGutters>
+                  <ListItemIcon sx={{ minWidth: 32 }}>
+                    <InfoIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Mã lớp:"
+                    secondary={mainClass.class_code}
                   />
-                </Typography>
-              </Box>
+                </ListItem>
+                {mainClass.department_id && (
+                  <ListItem disableGutters>
+                    <ListItemIcon sx={{ minWidth: 32 }}>
+                      <School fontSize="small" />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary="Khoa:"
+                      secondary={mainClass.department_id.name}
+                    />
+                  </ListItem>
+                )}
+                <ListItem disableGutters>
+                  <ListItemIcon sx={{ minWidth: 32 }}>
+                    <Group fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Tổng số sinh viên:"
+                    secondary={
+                      <Chip
+                        label={mainClass.students?.length || 0}
+                        color="primary"
+                        size="small"
+                        sx={{ fontWeight: "bold" }}
+                      />
+                    }
+                  />
+                </ListItem>
+              </List>
             </Grid>
             <Grid item xs={12} md={6}>
               <Typography
                 variant="subtitle1"
-                sx={{ color: "primary.main", fontWeight: "bold" }}
+                gutterBottom
+                sx={{ fontWeight: "medium", color: "text.secondary" }}
               >
                 Giáo viên cố vấn
               </Typography>
-              <Box
-                sx={{
-                  pl: 2,
-                  borderLeft: "4px solid",
-                  borderColor: "primary.main",
-                }}
-              >
-                {mainClass.advisor_id ? (
-                  <>
-                    <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
-                      <Avatar sx={{ mr: 2, bgcolor: "primary.main" }}>
-                        {mainClass.advisor_id.full_name?.charAt(0) || "A"}
+              {mainClass.advisor_id ? (
+                <List dense disablePadding>
+                  <ListItem disableGutters alignItems="flex-start">
+                    <ListItemAvatar>
+                      <Avatar sx={{ bgcolor: "secondary.main" }}>
+                        {mainClass.advisor_id.full_name?.charAt(0) || "GV"}
                       </Avatar>
-                      <Box>
-                        <Typography variant="body1">
-                          <strong>Họ tên:</strong>{" "}
-                          {mainClass.advisor_id.full_name}
-                        </Typography>
-                        <Typography variant="body2">
-                          <strong>Email:</strong> {mainClass.advisor_id.email}
-                        </Typography>
-                      </Box>
-                    </Box>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={mainClass.advisor_id.full_name}
+                      secondary={mainClass.advisor_id.email}
+                      primaryTypographyProps={{ fontWeight: "medium" }}
+                    />
+                  </ListItem>
+                  <ListItem disableGutters sx={{ pl: 7 }}>
+                    {" "}
+                    {/* Align with text of avatar list item */}
                     <Chip
-                      icon={<CheckCircle />}
-                      label="Giáo viên cố vấn hiện tại"
+                      icon={<CheckCircle sx={{ fontSize: 16 }} />}
+                      label="Cố vấn hiện tại"
                       color="success"
                       variant="outlined"
                       size="small"
                     />
-                  </>
-                ) : (
-                  <Typography color="text.secondary">
-                    <Warning
-                      sx={{
-                        verticalAlign: "middle",
-                        mr: 1,
-                        color: "warning.main",
-                      }}
-                    />
-                    Chưa có giáo viên cố vấn
+                  </ListItem>
+                </List>
+              ) : (
+                <Box
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    color: "text.secondary",
+                    mt: 1,
+                  }}
+                >
+                  <Warning sx={{ mr: 1, color: "warning.main" }} />
+                  <Typography variant="body2">
+                    Chưa có giáo viên cố vấn.
                   </Typography>
-                )}
-              </Box>
+                </Box>
+              )}
             </Grid>
           </Grid>
         </CardContent>
@@ -560,8 +590,8 @@ const TeacherMainClassPage = () => {
   };
 
   // Render khi có lỗi
-  const renderErrorState = () => (
-    <Box sx={{ p: 3 }}>
+  const renderErrorStateJSX = () => (
+    <Box sx={{ p: 3, mt: 2 /* Thêm khoảng cách từ header */ }}>
       <Alert
         severity="error"
         sx={{ mb: 2 }}
@@ -643,9 +673,9 @@ const TeacherMainClassPage = () => {
 
       // Kiểm tra các trường bắt buộc
       if (!newClass.name || !newClass.code || !newClass.department_id) {
-        enqueueSnackbar("Vui lòng điền đầy đủ thông tin", {
-          variant: "warning",
-        });
+        // enqueueSnackbar("Vui lòng điền đầy đủ thông tin", {
+        //   variant: "warning",
+        // });
         setIsSubmitting(false);
         return;
       }
@@ -664,15 +694,15 @@ const TeacherMainClassPage = () => {
         }
       );
 
-      enqueueSnackbar("Tạo lớp chính thành công", { variant: "success" });
+      // enqueueSnackbar("Tạo lớp chính thành công", { variant: "success" });
       handleCloseAddClassDialog();
       fetchMainClasses(); // Tải lại danh sách lớp
     } catch (error) {
       console.error("Lỗi khi tạo lớp chính:", error);
-      enqueueSnackbar(
-        error.response?.data?.message || "Lỗi khi tạo lớp chính",
-        { variant: "error" }
-      );
+      // enqueueSnackbar(
+      //   error.response?.data?.message || "Lỗi khi tạo lớp chính",
+      //   { variant: "error" }
+      // );
     } finally {
       setIsSubmitting(false);
     }
@@ -1062,9 +1092,9 @@ const TeacherMainClassPage = () => {
         !editClassData.code ||
         !editClassData.department_id
       ) {
-        enqueueSnackbar("Vui lòng điền đầy đủ thông tin", {
-          variant: "warning",
-        });
+        // enqueueSnackbar("Vui lòng điền đầy đủ thông tin", {
+        //   variant: "warning",
+        // });
         setIsSubmittingEdit(false);
         return;
       }
@@ -1081,7 +1111,7 @@ const TeacherMainClassPage = () => {
         }
       );
 
-      enqueueSnackbar("Cập nhật lớp chính thành công", { variant: "success" });
+      // enqueueSnackbar("Cập nhật lớp chính thành công", { variant: "success" });
       handleCloseEditClassDialog();
 
       // Cập nhật thông tin lớp chính trong state
@@ -1100,54 +1130,192 @@ const TeacherMainClassPage = () => {
       }
     } catch (error) {
       console.error("Lỗi khi cập nhật lớp chính:", error);
-      enqueueSnackbar(
-        error.response?.data?.message || "Lỗi khi cập nhật lớp chính",
-        { variant: "error" }
-      );
+      // enqueueSnackbar(
+      //   error.response?.data?.message || "Lỗi khi cập nhật lớp chính",
+      //   { variant: "error" }
+      // );
     } finally {
       setIsSubmittingEdit(false);
     }
   };
 
-  if (isLoading) {
-    return renderLoadingState();
-  }
+  const handleOpenConfirmDeleteStudentDialog = (student) => {
+    setConfirmDeleteStudentDialog({ open: true, student: student });
+  };
 
-  if (error && !mainClass) {
-    return renderErrorState();
-  }
+  const handleCloseConfirmDeleteStudentDialog = () => {
+    setConfirmDeleteStudentDialog({ open: false, student: null });
+  };
 
-  if (!mainClass) {
-    return (
-      <Box sx={{ p: 3 }}>
-        <Alert
-          severity="info"
-          icon={<Info />}
-          sx={{ mb: 2, display: "flex", alignItems: "center" }}
-        >
-          <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: "bold" }}>
-              Bạn chưa được phân công làm cố vấn cho lớp nào
-            </Typography>
-            <Typography variant="body2">
-              Vui lòng liên hệ với quản trị viên để được phân công lớp cố vấn
-            </Typography>
-          </Box>
-        </Alert>
+  const handleDeleteStudentFromMainClass = async () => {
+    if (!mainClass || !confirmDeleteStudentDialog.student) return;
+
+    const classId = mainClass._id;
+    const studentId = confirmDeleteStudentDialog.student._id;
+
+    try {
+      setIsLoadingApproved(true); // Indicate loading
+      await axios.delete(
+        `${API_URL}/classes/main/${classId}/students/${studentId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      // enqueueSnackbar("Xóa sinh viên khỏi lớp chính thành công!", {
+      //   variant: "success",
+      // });
+      // Refresh the list of approved students
+      fetchApprovedStudents(classId);
+      // Close the confirmation dialog
+      handleCloseConfirmDeleteStudentDialog();
+    } catch (error) {
+      console.error("Lỗi khi xóa sinh viên khỏi lớp chính:", error);
+      // enqueueSnackbar(
+      //   error.response?.data?.message || "Lỗi khi xóa sinh viên khỏi lớp chính",
+      //   { variant: "error" }
+      // );
+    } finally {
+      setIsLoadingApproved(false);
+    }
+  };
+
+  // State for confirming main class deletion
+  const handleOpenConfirmDeleteMainClassDialog = () => {
+    setConfirmDeleteMainClassDialog({ open: true });
+  };
+
+  const handleCloseConfirmDeleteMainClassDialog = () => {
+    setConfirmDeleteMainClassDialog({ open: false });
+  };
+
+  // Dialog xác nhận xóa lớp chính
+  const renderConfirmDeleteMainClassDialog = () => (
+    <Dialog
+      open={confirmDeleteMainClassDialog.open}
+      onClose={handleCloseConfirmDeleteMainClassDialog}
+      maxWidth="sm"
+      fullWidth
+    >
+      <DialogTitle sx={{ bgcolor: "error.dark", color: "white" }}>
+        {/* <Warning sx={{ verticalAlign: "middle", mr: 1 }} />  Assume Warning is imported */}
+        Xác nhận xóa Lớp Chủ Nhiệm
+      </DialogTitle>
+      <DialogContent sx={{ pt: 2 }}>
+        <DialogContentText component="div">
+          <Typography variant="body1" gutterBottom>
+            Bạn có chắc chắn muốn xóa lớp chủ nhiệm này không:
+          </Typography>
+          <Typography
+            variant="h6"
+            gutterBottom
+            color="text.primary"
+            sx={{ fontWeight: "bold" }}
+          >
+            {mainClass?.name} ({mainClass?.class_code})
+          </Typography>
+          <Typography
+            variant="body2"
+            color="error.main"
+            sx={{ mt: 1, fontWeight: "bold" }}
+          >
+            {/* <Warning sx={{ verticalAlign: "middle", fontSize: "1.1rem", mr: 0.5 }} /> Assume Warning is imported */}
+            LƯU Ý: Hành động này không thể hoàn tác.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Tất cả dữ liệu liên quan đến lớp chủ nhiệm này (bao gồm việc gỡ bỏ
+            liên kết của sinh viên khỏi lớp, cập nhật các lớp giảng dạy liên
+            quan, và xóa các thông báo liên quan) sẽ được thực hiện.
+          </Typography>
+        </DialogContentText>
+      </DialogContent>
+      <DialogActions sx={{ p: 2 }}>
         <Button
-          variant="contained"
-          color="primary"
-          onClick={() => navigate("/teacher/dashboard")}
-          startIcon={<School />}
+          onClick={handleCloseConfirmDeleteMainClassDialog}
+          color="inherit"
+          variant="outlined"
         >
-          Quay lại trang chủ
+          Hủy
         </Button>
+        <Button
+          onClick={async () => {
+            if (!mainClass?._id) return;
+            try {
+              setIsLoading(true);
+              await axios.delete(`${API_URL}/classes/main/${mainClass._id}`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              // enqueueSnackbar(
+              //   "Xóa lớp chủ nhiệm và các dữ liệu liên quan thành công!",
+              //   { variant: "success" }
+              // );
+              handleCloseConfirmDeleteMainClassDialog();
+              navigate("/teacher/dashboard");
+            } catch (error) {
+              console.error("Lỗi khi xóa lớp chủ nhiệm:", error);
+              // enqueueSnackbar(
+              //   error.response?.data?.message || "Lỗi khi xóa lớp chủ nhiệm",
+              //   { variant: "error" }
+              // );
+              setIsLoading(false);
+            }
+          }}
+          color="error"
+          variant="contained"
+          autoFocus
+          startIcon={<DeleteForever />}
+        >
+          Xóa Lớp Chủ Nhiệm
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+
+  if (isLoading) {
+    return (
+      <Box sx={{ padding: 3 }}>
+        {/* Phần Header luôn hiển thị */}
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            mb: 3,
+          }}
+        >
+          <Typography
+            variant="h4"
+            gutterBottom={false}
+            sx={{
+              fontWeight: "bold",
+              color: "primary.main",
+              display: "flex",
+              alignItems: "center",
+              m: 0,
+            }}
+          >
+            <School sx={{ mr: 1, fontSize: 32 }} />
+            Quản lý lớp chính
+          </Typography>
+          <Box sx={{ display: "flex", gap: 2 }}>
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<Add />}
+              onClick={handleOpenAddClassDialog}
+            >
+              Thêm lớp chính
+            </Button>
+            {/* Nút Làm mới sẽ không hiển thị khi đang loading và chưa có mainClass */}
+          </Box>
+        </Box>
+        {renderLoadingState()}
       </Box>
     );
   }
 
   return (
     <Box sx={{ padding: 3 }}>
+      {/* Phần Header luôn hiển thị */}
       <Box
         sx={{
           display: "flex",
@@ -1179,575 +1347,598 @@ const TeacherMainClassPage = () => {
           >
             Thêm lớp chính
           </Button>
-          <Button
-            variant="outlined"
-            color="primary"
-            size="small"
-            onClick={refreshAllData}
-            startIcon={<HourglassEmpty />}
-            disabled={isLoadingPending || isLoadingApproved}
-          >
-            {isLoadingPending || isLoadingApproved
-              ? "Đang làm mới..."
-              : "Làm mới dữ liệu"}
-          </Button>
+          {mainClass && ( // Chỉ hiển thị nút Làm mới nếu có mainClass
+            <Button
+              variant="outlined"
+              color="primary"
+              size="small"
+              onClick={refreshAllData}
+              startIcon={<HourglassEmpty />}
+              disabled={isLoadingPending || isLoadingApproved}
+            >
+              {isLoadingPending || isLoadingApproved
+                ? "Đang làm mới..."
+                : "Làm mới dữ liệu"}
+            </Button>
+          )}
         </Box>
       </Box>
 
-      {mainClasses.length > 1 && (
-        <Card sx={{ mb: 3, p: 2, boxShadow: 3 }}>
-          <Box sx={{ display: "flex", alignItems: "center" }}>
-            <Class sx={{ mr: 2, color: "primary.main", fontSize: 28 }} />
-            <FormControl fullWidth>
-              <InputLabel id="class-select-label">
-                Chọn lớp để quản lý
-              </InputLabel>
-              <Select
-                labelId="class-select-label"
-                id="class-select"
-                value={mainClass ? mainClass._id : ""}
-                onChange={handleChangeClass}
-                input={<OutlinedInput label="Chọn lớp để quản lý" />}
-                renderValue={(selectedId) => {
-                  const selectedClass = mainClasses.find(
-                    (cls) => cls._id === selectedId
-                  );
-                  return (
-                    <Box sx={{ display: "flex", alignItems: "center" }}>
-                      <School sx={{ mr: 1, color: "primary.main" }} />
-                      <Typography variant="body1" sx={{ fontWeight: "bold" }}>
-                        {selectedClass?.name} ({selectedClass?.class_code})
-                      </Typography>
-                      <Box
-                        sx={{ display: "flex", alignItems: "center", ml: 2 }}
-                      >
-                        <Chip
-                          size="small"
-                          color="primary"
-                          label={`${
-                            selectedClass?.students?.length || 0
-                          } sinh viên`}
-                        />
-                        {pendingStudents.length > 0 && (
-                          <Chip
-                            size="small"
-                            color="error"
-                            icon={<HourglassEmpty />}
-                            label={`${pendingStudents.length} chờ duyệt`}
-                            sx={{ ml: 1 }}
-                          />
-                        )}
-                      </Box>
-                    </Box>
-                  );
-                }}
+      {/* Nội dung chính của trang, render có điều kiện */}
+      {(() => {
+        // isLoading đã được xử lý ở trên bằng cách return sớm toàn bộ component với header + loading state
+        // nên ở đây không cần check isLoading nữa nếu cấu trúc return sớm được giữ
+
+        if (error && !mainClass) {
+          // Nếu có lỗi ban đầu và không có mainClass nào được tải
+          return renderErrorStateJSX();
+        }
+
+        if (!mainClass) {
+          // Nếu không có mainClass nào được phân công (sau khi đã load xong, không có lỗi ban đầu)
+          return (
+            <Box sx={{ p: 3, mt: 2 /* Thêm khoảng cách từ header */ }}>
+              <Alert
+                severity="info"
+                icon={<Info />}
+                sx={{ mb: 2, display: "flex", alignItems: "center" }}
               >
-                {mainClasses.map((cls) => (
-                  <MenuItem key={cls._id} value={cls._id}>
-                    <Box
-                      sx={{
-                        display: "flex",
-                        alignItems: "center",
-                        width: "100%",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <Box sx={{ display: "flex", alignItems: "center" }}>
-                        <School
-                          sx={{
-                            mr: 1,
-                            color:
-                              cls._id === mainClass?._id
-                                ? "primary.main"
-                                : "text.secondary",
-                          }}
-                        />
-                        <Typography
-                          color={
-                            cls._id === mainClass?._id
-                              ? "primary.main"
-                              : "text.primary"
-                          }
-                          sx={{
-                            fontWeight:
-                              cls._id === mainClass?._id ? "bold" : "normal",
-                          }}
-                        >
-                          {cls.name}
-                        </Typography>
-                        <Typography
-                          variant="caption"
-                          sx={{ ml: 1, color: "text.secondary" }}
-                        >
-                          ({cls.class_code})
-                        </Typography>
-                      </Box>
-                      <Chip
-                        size="small"
-                        color={
-                          cls._id === mainClass?._id ? "primary" : "default"
-                        }
-                        variant={
-                          cls._id === mainClass?._id ? "filled" : "outlined"
-                        }
-                        label={`${cls.students?.length || 0} sinh viên`}
-                      />
-                    </Box>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Box>
-        </Card>
-      )}
-
-      {renderClassInfo()}
-
-      <Paper sx={{ width: "100%", mb: 2, overflow: "hidden", boxShadow: 3 }}>
-        <Tabs
-          value={tabValue}
-          onChange={handleTabChange}
-          indicatorColor="primary"
-          textColor="primary"
-          variant="fullWidth"
-          sx={{
-            borderBottom: 1,
-            borderColor: "divider",
-            "& .MuiTab-root": { fontWeight: "bold" },
-          }}
-        >
-          <Tab
-            label={
-              <Box sx={{ display: "flex", alignItems: "center" }}>
-                <Badge
-                  badgeContent={pendingStudents.length}
-                  color="error"
-                  max={99}
-                  sx={{ "& .MuiBadge-badge": { fontWeight: "bold" } }}
-                >
-                  <HourglassEmpty sx={{ mr: 1 }} />
-                </Badge>
-                <Box sx={{ ml: pendingStudents.length > 0 ? 1 : 0 }}>
-                  Sinh viên chờ duyệt
+                <Box>
+                  <Typography variant="subtitle1" sx={{ fontWeight: "bold" }}>
+                    Bạn chưa được phân công làm cố vấn cho lớp nào
+                  </Typography>
+                  <Typography variant="body2">
+                    Vui lòng liên hệ với quản trị viên để được phân công lớp cố
+                    vấn
+                  </Typography>
                 </Box>
-              </Box>
-            }
-          />
-          <Tab
-            label={
-              <Box sx={{ display: "flex", alignItems: "center" }}>
-                <Badge
-                  badgeContent={approvedStudents.length}
-                  color="success"
-                  max={99}
-                  sx={{ "& .MuiBadge-badge": { fontWeight: "bold" } }}
-                >
-                  <School sx={{ mr: 1 }} />
-                </Badge>
-                <Box sx={{ ml: approvedStudents.length > 0 ? 1 : 0 }}>
-                  Sinh viên của lớp
-                </Box>
-              </Box>
-            }
-          />
-        </Tabs>
-
-        <TabPanel value={tabValue} index={0}>
-          <Box
-            sx={{
-              mb: 2,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <Typography variant="h6" component="div" sx={{ mb: 1 }}>
-              Danh sách sinh viên chờ duyệt
-            </Typography>
-            <Box sx={{ display: "flex", gap: 2 }}>
-              <TextField
-                size="small"
-                label="Tìm kiếm sinh viên"
-                variant="outlined"
-                value={pendingSearchTerm}
-                onChange={(e) => setPendingSearchTerm(e.target.value)}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                }}
-              />
+              </Alert>
               <Button
-                variant="outlined"
-                startIcon={<RefreshIcon />}
-                onClick={() => {
-                  fetchPendingStudents(mainClass._id);
-                }}
-                disabled={isLoadingPending}
+                variant="contained"
+                color="primary"
+                onClick={() => navigate("/teacher/dashboard")}
+                startIcon={<School />}
               >
-                Làm mới
+                Quay lại trang chủ
               </Button>
             </Box>
-          </Box>
+          );
+        }
 
-          {isLoadingPending ? (
-            <Box sx={{ display: "flex", justifyContent: "center", my: 4 }}>
-              <CircularProgress />
-            </Box>
-          ) : filteredPendingStudents.length > 0 ? (
-            <TableContainer component={Paper}>
-              <Table sx={{ minWidth: 650 }} aria-label="simple table">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Họ và tên</TableCell>
-                    <TableCell>Email</TableCell>
-                    <TableCell>MSSV</TableCell>
-                    <TableCell>Lớp</TableCell>
-                    <TableCell align="center">Hành động</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filteredPendingStudents.map((student) => (
-                    <TableRow key={student._id}>
-                      <TableCell component="th" scope="row">
-                        <Box sx={{ display: "flex", alignItems: "center" }}>
-                          <Avatar
-                            src={student.avatar_url}
-                            alt={student.full_name}
-                            sx={{ width: 36, height: 36, mr: 1.5 }}
-                          >
-                            {student.full_name?.charAt(0) || "S"}
-                          </Avatar>
-                          <Box>
-                            <Typography
-                              variant="body1"
-                              sx={{ fontWeight: "medium" }}
-                            >
-                              {student.full_name}
-                            </Typography>
-                            {student.has_face_data && (
-                              <Chip
-                                icon={<Face />}
-                                label="Đã đăng ký khuôn mặt"
-                                size="small"
-                                color="success"
-                                variant="outlined"
-                                sx={{ mt: 0.5, height: 24 }}
-                              />
-                            )}
-                          </Box>
-                        </Box>
-                      </TableCell>
-                      <TableCell>{student.email}</TableCell>
-                      <TableCell>
-                        {student.school_info?.student_id ||
-                          student.school_info?.student_code || (
-                            <Typography
-                              variant="body2"
-                              color="text.secondary"
-                              fontStyle="italic"
-                            >
-                              Chưa cập nhật
-                            </Typography>
-                          )}
-                      </TableCell>
-                      <TableCell>
-                        {student.school_info?.class || (
-                          <Typography
-                            variant="body2"
-                            color="text.secondary"
-                            fontStyle="italic"
-                          >
-                            Chưa cập nhật
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell align="center">
-                        <Tooltip title="Xem chi tiết">
-                          <IconButton
-                            onClick={() => {
-                              setSelectedStudent(student);
-                              setOpenStudentDetail(true);
-                            }}
-                          >
-                            <InfoIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Duyệt sinh viên">
-                          <IconButton
-                            color="primary"
-                            onClick={() => handleApproveStudent(student._id)}
-                          >
-                            <CheckIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Từ chối">
-                          <IconButton
-                            color="error"
-                            onClick={() => openRejectDialog(student._id)}
-                          >
-                            <ClearIcon />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          ) : (
-            <Paper sx={{ p: 4, textAlign: "center" }}>
-              <NoDataSvg width="200px" height="200px" />
-              <Typography variant="h6" color="textSecondary" sx={{ mt: 2 }}>
-                Không có sinh viên nào chờ duyệt
-              </Typography>
-              <Typography variant="body2" color="textSecondary">
-                Khi có sinh viên đăng ký vào lớp, họ sẽ xuất hiện ở đây
-              </Typography>
-            </Paper>
-          )}
-        </TabPanel>
-
-        <TabPanel value={tabValue} index={1}>
-          <Box
-            sx={{
-              mb: 2,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: 1,
-            }}
-          >
-            <Typography variant="h6" component="div">
-              Danh sách sinh viên đã duyệt
-            </Typography>
-            <Box sx={{ display: "flex", gap: 2 }}>
-              <TextField
-                size="small"
-                label="Tìm kiếm sinh viên"
-                variant="outlined"
-                value={approvedSearchTerm}
-                onChange={(e) => {
-                  setApprovedSearchTerm(e.target.value);
-                  setPage(0);
-                }}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              <Button
-                variant="outlined"
-                startIcon={<RefreshIcon />}
-                onClick={() => {
-                  setApprovedSearchTerm("");
-                  setPage(0);
-                  fetchApprovedStudents(mainClass._id);
-                }}
-                disabled={isLoadingApproved}
-              >
-                Làm mới
-              </Button>
-            </Box>
-          </Box>
-
-          {isLoadingApproved ? (
-            <Box sx={{ display: "flex", justifyContent: "center", my: 4 }}>
-              <CircularProgress />
-            </Box>
-          ) : filteredApprovedStudents.length > 0 ? (
-            <>
-              <TableContainer component={Paper} sx={{ boxShadow: 2 }}>
-                <Table sx={{ minWidth: 650 }} aria-label="simple table">
-                  <TableHead>
-                    <TableRow sx={{ bgcolor: "primary.lighter" }}>
-                      <TableCell>Họ và tên</TableCell>
-                      <TableCell>Email</TableCell>
-                      <TableCell>MSSV</TableCell>
-                      <TableCell>Lớp</TableCell>
-                      <TableCell>Khuôn mặt</TableCell>
-                      <TableCell align="center">Hành động</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {filteredApprovedStudents.map((student) => (
-                      <TableRow key={student._id} hover>
-                        <TableCell component="th" scope="row">
+        // Nếu có mainClass, hiển thị thông tin lớp và các tab
+        return (
+          <>
+            {mainClasses.length > 1 && (
+              <Card sx={{ mb: 3, p: 2, boxShadow: 3 }}>
+                <Box sx={{ display: "flex", alignItems: "center" }}>
+                  <Class sx={{ mr: 2, color: "primary.main", fontSize: 28 }} />
+                  <FormControl fullWidth>
+                    <InputLabel id="class-select-label">
+                      Chọn lớp để quản lý
+                    </InputLabel>
+                    <Select
+                      labelId="class-select-label"
+                      id="class-select"
+                      value={mainClass ? mainClass._id : ""}
+                      onChange={handleChangeClass}
+                      input={<OutlinedInput label="Chọn lớp để quản lý" />}
+                      renderValue={(selectedId) => {
+                        const selectedClass = mainClasses.find(
+                          (cls) => cls._id === selectedId
+                        );
+                        return (
                           <Box sx={{ display: "flex", alignItems: "center" }}>
-                            <Avatar
-                              src={student.avatar_url}
-                              alt={student.full_name}
-                              sx={{ width: 36, height: 36, mr: 1.5 }}
-                            >
-                              {student.full_name?.charAt(0) || "S"}
-                            </Avatar>
+                            <School sx={{ mr: 1, color: "primary.main" }} />
                             <Typography
                               variant="body1"
-                              sx={{ fontWeight: "medium" }}
+                              sx={{ fontWeight: "bold" }}
                             >
-                              {student.full_name}
+                              {selectedClass?.name} ({selectedClass?.class_code}
+                              )
                             </Typography>
-                          </Box>
-                        </TableCell>
-                        <TableCell>{student.email}</TableCell>
-                        <TableCell>
-                          {student.school_info?.student_id ||
-                            student.school_info?.student_code || (
-                              <Typography
-                                variant="body2"
-                                color="text.secondary"
-                                fontStyle="italic"
-                              >
-                                Chưa cập nhật
-                              </Typography>
-                            )}
-                        </TableCell>
-                        <TableCell>
-                          {student.school_info?.class || (
-                            <Typography
-                              variant="body2"
-                              color="text.secondary"
-                              fontStyle="italic"
-                            >
-                              Chưa cập nhật
-                            </Typography>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {student.has_face_data ? (
-                            <Chip
-                              icon={<Face />}
-                              label="Đã đăng ký"
-                              size="small"
-                              color="success"
-                              variant="outlined"
-                            />
-                          ) : (
-                            <Chip
-                              icon={<NoFace />}
-                              label="Chưa đăng ký"
-                              size="small"
-                              color="warning"
-                              variant="outlined"
-                            />
-                          )}
-                        </TableCell>
-                        <TableCell align="center">
-                          <Tooltip title="Xem chi tiết">
-                            <IconButton
-                              onClick={() => {
-                                setSelectedStudent(student);
-                                setOpenStudentDetail(true);
+                            <Box
+                              sx={{
+                                display: "flex",
+                                alignItems: "center",
+                                ml: 2,
                               }}
                             >
-                              <InfoIcon />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-              <TablePagination
-                rowsPerPageOptions={[5, 10, 25, 50]}
-                component="div"
-                count={totalApproved}
-                rowsPerPage={rowsPerPage}
-                page={page}
-                onPageChange={handleChangePage}
-                onRowsPerPageChange={handleChangeRowsPerPage}
-                labelRowsPerPage="Số hàng mỗi trang:"
-                labelDisplayedRows={({ from, to, count }) =>
-                  `${from}-${to} của ${count}`
-                }
-              />
-            </>
-          ) : (
-            <Paper sx={{ p: 4, textAlign: "center" }}>
-              <NoDataSvg width="200px" height="200px" />
-              <Typography variant="h6" color="textSecondary" sx={{ mt: 2 }}>
-                Chưa có sinh viên nào được duyệt
-              </Typography>
-              <Typography variant="body2" color="textSecondary">
-                Khi bạn duyệt sinh viên, họ sẽ xuất hiện ở đây
-              </Typography>
+                              <Chip
+                                size="small"
+                                color="primary"
+                                label={`${
+                                  selectedClass?.students?.length || 0
+                                } sinh viên`}
+                              />
+                              {mainClass &&
+                                mainClass._id === selectedId &&
+                                pendingStudents.length > 0 && (
+                                  <Chip
+                                    size="small"
+                                    color="error"
+                                    icon={<HourglassEmpty />}
+                                    label={`${pendingStudents.length} chờ duyệt`}
+                                    sx={{ ml: 1 }}
+                                  />
+                                )}
+                            </Box>
+                          </Box>
+                        );
+                      }}
+                    >
+                      {mainClasses.map((cls) => (
+                        <MenuItem key={cls._id} value={cls._id}>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              alignItems: "center",
+                              width: "100%",
+                              justifyContent: "space-between",
+                            }}
+                          >
+                            <Box sx={{ display: "flex", alignItems: "center" }}>
+                              <School
+                                sx={{
+                                  mr: 1,
+                                  color:
+                                    cls._id === mainClass?._id
+                                      ? "primary.main"
+                                      : "text.secondary",
+                                }}
+                              />
+                              <Typography
+                                color={
+                                  cls._id === mainClass?._id
+                                    ? "primary.main"
+                                    : "text.primary"
+                                }
+                                sx={{
+                                  fontWeight:
+                                    cls._id === mainClass?._id
+                                      ? "bold"
+                                      : "normal",
+                                }}
+                              >
+                                {cls.name}
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                sx={{ ml: 1, color: "text.secondary" }}
+                              >
+                                ({cls.class_code})
+                              </Typography>
+                            </Box>
+                            <Chip
+                              size="small"
+                              color={
+                                cls._id === mainClass?._id
+                                  ? "primary"
+                                  : "default"
+                              }
+                              variant={
+                                cls._id === mainClass?._id
+                                  ? "filled"
+                                  : "outlined"
+                              }
+                              label={`${cls.students?.length || 0} sinh viên`}
+                            />
+                          </Box>
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Box>
+              </Card>
+            )}
+
+            {renderClassInfo()}
+
+            <Paper
+              sx={{ width: "100%", mb: 2, overflow: "hidden", boxShadow: 3 }}
+            >
+              <Tabs
+                value={tabValue}
+                onChange={handleTabChange}
+                indicatorColor="primary"
+                textColor="primary"
+                variant="fullWidth"
+                sx={{
+                  borderBottom: 1,
+                  borderColor: "divider",
+                  "& .MuiTab-root": { fontWeight: "bold" },
+                }}
+              >
+                <Tab
+                  label={
+                    <Box sx={{ display: "flex", alignItems: "center" }}>
+                      <Badge
+                        badgeContent={pendingStudents.length}
+                        color="error"
+                        max={99}
+                        sx={{ "& .MuiBadge-badge": { fontWeight: "bold" } }}
+                      >
+                        <HourglassEmpty sx={{ mr: 1 }} />
+                      </Badge>
+                      <Box sx={{ ml: pendingStudents.length > 0 ? 1 : 0 }}>
+                        Sinh viên chờ duyệt
+                      </Box>
+                    </Box>
+                  }
+                />
+                <Tab
+                  label={
+                    <Box sx={{ display: "flex", alignItems: "center" }}>
+                      <Badge
+                        badgeContent={totalApproved}
+                        color="success"
+                        max={999}
+                        sx={{ "& .MuiBadge-badge": { fontWeight: "bold" } }}
+                      >
+                        <School sx={{ mr: 1 }} />
+                      </Badge>
+                      <Box sx={{ ml: totalApproved > 0 ? 1 : 0 }}>
+                        Sinh viên của lớp ({totalApproved})
+                      </Box>
+                    </Box>
+                  }
+                />
+              </Tabs>
+
+              <TabPanel value={tabValue} index={0}>
+                <Box
+                  sx={{
+                    mb: 2,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <Typography variant="h6" component="div" sx={{ mb: 1 }}>
+                    Danh sách sinh viên chờ duyệt
+                  </Typography>
+                  <Box sx={{ display: "flex", gap: 2 }}>
+                    <TextField
+                      size="small"
+                      label="Tìm kiếm sinh viên"
+                      variant="outlined"
+                      value={pendingSearchTerm}
+                      onChange={(e) => setPendingSearchTerm(e.target.value)}
+                      InputProps={{
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <SearchIcon />
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                    <Button
+                      variant="outlined"
+                      startIcon={<RefreshIcon />}
+                      onClick={() => {
+                        fetchPendingStudents(mainClass._id);
+                      }}
+                      disabled={isLoadingPending}
+                    >
+                      Làm mới
+                    </Button>
+                  </Box>
+                </Box>
+
+                {isLoadingPending ? (
+                  <Box
+                    sx={{ display: "flex", justifyContent: "center", my: 4 }}
+                  >
+                    <CircularProgress />
+                  </Box>
+                ) : filteredPendingStudents.length > 0 ? (
+                  <TableContainer component={Paper}>
+                    <Table sx={{ minWidth: 650 }} aria-label="simple table">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Họ và tên</TableCell>
+                          <TableCell>Email</TableCell>
+                          <TableCell>MSSV</TableCell>
+                          <TableCell>Lớp</TableCell>
+                          <TableCell align="center">Hành động</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {filteredPendingStudents.map((student) => (
+                          <TableRow key={student._id}>
+                            <TableCell component="th" scope="row">
+                              <Box
+                                sx={{ display: "flex", alignItems: "center" }}
+                              >
+                                <Avatar
+                                  src={student.avatar_url}
+                                  alt={student.full_name}
+                                  sx={{ width: 36, height: 36, mr: 1.5 }}
+                                >
+                                  {student.full_name?.charAt(0) || "S"}
+                                </Avatar>
+                                <Box>
+                                  <Typography
+                                    variant="body1"
+                                    sx={{ fontWeight: "medium" }}
+                                  >
+                                    {student.full_name}
+                                  </Typography>
+                                  {student.has_face_data && (
+                                    <Chip
+                                      icon={<Face />}
+                                      label="Đã đăng ký khuôn mặt"
+                                      size="small"
+                                      color="success"
+                                      variant="outlined"
+                                      sx={{ mt: 0.5, height: 24 }}
+                                    />
+                                  )}
+                                </Box>
+                              </Box>
+                            </TableCell>
+                            <TableCell>{student.email}</TableCell>
+                            <TableCell>
+                              {student.school_info?.student_id ||
+                                student.school_info?.student_code || (
+                                  <Typography
+                                    variant="body2"
+                                    color="text.secondary"
+                                    fontStyle="italic"
+                                  >
+                                    Chưa cập nhật
+                                  </Typography>
+                                )}
+                            </TableCell>
+                            <TableCell>
+                              {student.school_info?.class || (
+                                <Typography
+                                  variant="body2"
+                                  color="text.secondary"
+                                  fontStyle="italic"
+                                >
+                                  Chưa cập nhật
+                                </Typography>
+                              )}
+                            </TableCell>
+                            <TableCell align="center">
+                              <Tooltip title="Xem chi tiết">
+                                <IconButton
+                                  onClick={() => {
+                                    setSelectedStudent(student);
+                                    setOpenStudentDetail(true);
+                                  }}
+                                >
+                                  <InfoIcon />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Duyệt sinh viên">
+                                <IconButton
+                                  color="primary"
+                                  onClick={() =>
+                                    handleApproveStudent(student._id)
+                                  }
+                                >
+                                  <CheckIcon />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Từ chối">
+                                <IconButton
+                                  color="error"
+                                  onClick={() => openRejectDialog(student._id)}
+                                >
+                                  <ClearIcon />
+                                </IconButton>
+                              </Tooltip>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : (
+                  <Paper sx={{ p: 4, textAlign: "center" }}>
+                    <NoDataSvg width="200px" height="200px" />
+                    <Typography
+                      variant="h6"
+                      color="textSecondary"
+                      sx={{ mt: 2 }}
+                    >
+                      Không có sinh viên nào chờ duyệt
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      Khi có sinh viên đăng ký vào lớp, họ sẽ xuất hiện ở đây
+                    </Typography>
+                  </Paper>
+                )}
+              </TabPanel>
+
+              <TabPanel value={tabValue} index={1}>
+                <Box
+                  sx={{
+                    mb: 2,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: 1,
+                  }}
+                >
+                  <Typography variant="h6" component="div">
+                    Danh sách sinh viên đã duyệt
+                  </Typography>
+                  <Box sx={{ display: "flex", gap: 2 }}>
+                    <TextField
+                      size="small"
+                      label="Tìm kiếm sinh viên"
+                      variant="outlined"
+                      value={approvedSearchTerm}
+                      onChange={(e) => {
+                        setApprovedSearchTerm(e.target.value);
+                        setPage(0);
+                      }}
+                      InputProps={{
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <SearchIcon />
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                    <Button
+                      variant="outlined"
+                      startIcon={<RefreshIcon />}
+                      onClick={() => {
+                        setApprovedSearchTerm("");
+                        setPage(0);
+                        fetchApprovedStudents(mainClass._id);
+                      }}
+                      disabled={isLoadingApproved}
+                    >
+                      Làm mới
+                    </Button>
+                  </Box>
+                </Box>
+
+                {isLoadingApproved ? (
+                  <Box
+                    sx={{ display: "flex", justifyContent: "center", my: 4 }}
+                  >
+                    <CircularProgress />
+                  </Box>
+                ) : filteredApprovedStudents.length > 0 ? (
+                  <>
+                    <TableContainer component={Paper} sx={{ boxShadow: 2 }}>
+                      <Table sx={{ minWidth: 650 }} aria-label="simple table">
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: "primary.lighter" }}>
+                            <TableCell>Họ và tên</TableCell>
+                            <TableCell>Email</TableCell>
+                            <TableCell>MSSV</TableCell>
+                            <TableCell>Lớp</TableCell>
+                            <TableCell>Khuôn mặt</TableCell>
+                            <TableCell align="center">Hành động</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {filteredApprovedStudents.map((student, index) => (
+                            <TableRow key={student._id} hover>
+                              <TableCell>
+                                {page * rowsPerPage + index + 1}
+                              </TableCell>
+                              <TableCell>
+                                <Box
+                                  sx={{ display: "flex", alignItems: "center" }}
+                                >
+                                  <Avatar
+                                    src={student.avatar_url}
+                                    sx={{ width: 32, height: 32, mr: 1 }}
+                                  >
+                                    {student.full_name?.charAt(0).toUpperCase()}
+                                  </Avatar>
+                                  <Typography variant="body2">
+                                    {student.full_name}
+                                  </Typography>
+                                </Box>
+                              </TableCell>
+                              <TableCell>
+                                {student.school_info?.student_id || "N/A"}
+                              </TableCell>
+                              <TableCell>{student.email}</TableCell>
+                              <TableCell>
+                                {student.school_info?.class || (
+                                  <Typography
+                                    variant="body2"
+                                    color="text.secondary"
+                                    fontStyle="italic"
+                                  >
+                                    Chưa cập nhật
+                                  </Typography>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                {student.has_face_data ? (
+                                  <Chip
+                                    icon={<Face />}
+                                    label="Đã đăng ký"
+                                    size="small"
+                                    color="success"
+                                    variant="outlined"
+                                  />
+                                ) : (
+                                  <Chip
+                                    icon={<NoFace />}
+                                    label="Chưa đăng ký"
+                                    size="small"
+                                    color="warning"
+                                    variant="outlined"
+                                  />
+                                )}
+                              </TableCell>
+                              <TableCell align="center">
+                                <Tooltip title="Xem chi tiết sinh viên">
+                                  <IconButton
+                                    size="small"
+                                    color="info"
+                                    onClick={() => handleViewStudent(student)}
+                                  >
+                                    <InfoIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Xóa sinh viên này khỏi lớp chính">
+                                  <IconButton
+                                    size="small"
+                                    color="error"
+                                    onClick={() =>
+                                      handleOpenConfirmDeleteStudentDialog(
+                                        student
+                                      )
+                                    }
+                                  >
+                                    <DeleteForever fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    <TablePagination
+                      rowsPerPageOptions={[5, 10, 25, 50]}
+                      component="div"
+                      count={totalApproved}
+                      rowsPerPage={rowsPerPage}
+                      page={page}
+                      onPageChange={handleChangePage}
+                      onRowsPerPageChange={handleChangeRowsPerPage}
+                      labelRowsPerPage="Số hàng mỗi trang:"
+                      labelDisplayedRows={({ from, to, count }) =>
+                        `${from}-${to} của ${count}`
+                      }
+                    />
+                  </>
+                ) : (
+                  <Paper sx={{ p: 4, textAlign: "center" }}>
+                    <NoDataSvg width="200px" height="200px" />
+                    <Typography
+                      variant="h6"
+                      color="textSecondary"
+                      sx={{ mt: 2 }}
+                    >
+                      Chưa có sinh viên nào được duyệt
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      Khi bạn duyệt sinh viên, họ sẽ xuất hiện ở đây
+                    </Typography>
+                  </Paper>
+                )}
+              </TabPanel>
             </Paper>
-          )}
-        </TabPanel>
-      </Paper>
+          </>
+        );
+      })()}
 
-      {/* Dialog từ chối sinh viên */}
-      <Dialog
-        open={rejectDialog.open}
-        onClose={closeRejectDialog}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{
-          sx: { borderRadius: 2 },
-        }}
-      >
-        <DialogTitle
-          sx={{ bgcolor: "error.light", color: "white", fontWeight: "bold" }}
-        >
-          <Close sx={{ verticalAlign: "middle", mr: 1 }} />
-          Từ chối sinh viên
-        </DialogTitle>
-        <DialogContent sx={{ py: 2 }}>
-          <Alert severity="warning" sx={{ mt: 2, mb: 2 }}>
-            <Typography variant="body2">
-              Sinh viên sẽ nhận được thông báo về việc bị từ chối và lý do.
-              Trạng thái tài khoản của sinh viên sẽ chuyển sang "Từ chối".
-            </Typography>
-          </Alert>
-          <TextField
-            fullWidth
-            multiline
-            rows={3}
-            label="Lý do từ chối"
-            placeholder="Nhập lý do từ chối để thông báo cho sinh viên"
-            value={rejectDialog.reason}
-            onChange={(e) =>
-              setRejectDialog({ ...rejectDialog, reason: e.target.value })
-            }
-            variant="outlined"
-            required
-            error={rejectDialog.reason.trim() === ""}
-            helperText={
-              rejectDialog.reason.trim() === ""
-                ? "Vui lòng nhập lý do từ chối"
-                : ""
-            }
-            sx={{ mt: 1 }}
-          />
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button
-            onClick={closeRejectDialog}
-            variant="outlined"
-            startIcon={<Close />}
-          >
-            Hủy
-          </Button>
-          <Button
-            onClick={handleRejectStudent}
-            color="error"
-            variant="contained"
-            startIcon={<Close />}
-            disabled={rejectDialog.reason.trim() === ""}
-          >
-            Từ chối sinh viên
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Dialog thêm lớp chính */}
+      {/* Dialogs: Đảm bảo tất cả các dialog được render ở đây, bên ngoài IIFE */}
       <Dialog
         open={openAddClassDialog}
         onClose={handleCloseAddClassDialog}
@@ -1845,7 +2036,6 @@ const TeacherMainClassPage = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Dialog chỉnh sửa lớp chính */}
       <Dialog
         open={openEditClassDialog}
         onClose={handleCloseEditClassDialog}
@@ -1927,6 +2117,106 @@ const TeacherMainClassPage = () => {
       </Dialog>
 
       {renderStudentDetailDialog()}
+
+      <Dialog
+        open={confirmDeleteStudentDialog.open}
+        onClose={handleCloseConfirmDeleteStudentDialog}
+        maxWidth="xs"
+      >
+        <DialogTitle>Xác nhận xóa sinh viên</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {`Bạn có chắc chắn muốn xóa sinh viên `}
+            <strong>{confirmDeleteStudentDialog.student?.full_name}</strong>
+            {` (MSSV: `}
+            <strong>
+              {confirmDeleteStudentDialog.student?.school_info?.student_id ||
+                "N/A"}
+            </strong>
+            {`) khỏi lớp chủ nhiệm này không? Hành động này sẽ gỡ sinh viên ra khỏi lớp.`}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={handleCloseConfirmDeleteStudentDialog}
+            color="inherit"
+          >
+            Hủy
+          </Button>
+          <Button
+            onClick={handleDeleteStudentFromMainClass}
+            color="error"
+            autoFocus
+          >
+            Xóa
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {renderConfirmDeleteMainClassDialog()}
+
+      <Dialog
+        open={rejectDialog.open}
+        onClose={closeRejectDialog}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: 2 },
+        }}
+      >
+        <DialogTitle
+          sx={{ bgcolor: "error.light", color: "white", fontWeight: "bold" }}
+        >
+          <Close sx={{ verticalAlign: "middle", mr: 1 }} />
+          Từ chối sinh viên
+        </DialogTitle>
+        <DialogContent sx={{ py: 2 }}>
+          <Alert severity="warning" sx={{ mt: 2, mb: 2 }}>
+            <Typography variant="body2">
+              Sinh viên sẽ nhận được thông báo về việc bị từ chối và lý do.
+              Trạng thái tài khoản của sinh viên sẽ chuyển sang "Từ chối".
+            </Typography>
+          </Alert>
+          <TextField
+            fullWidth
+            multiline
+            rows={3}
+            label="Lý do từ chối"
+            placeholder="Nhập lý do từ chối để thông báo cho sinh viên"
+            value={rejectDialog.reason}
+            onChange={(e) =>
+              setRejectDialog({ ...rejectDialog, reason: e.target.value })
+            }
+            variant="outlined"
+            required
+            error={rejectDialog.reason.trim() === ""}
+            helperText={
+              rejectDialog.reason.trim() === ""
+                ? "Vui lòng nhập lý do từ chối"
+                : ""
+            }
+            sx={{ mt: 1 }}
+          />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={closeRejectDialog}
+            variant="outlined"
+            startIcon={<Close />}
+          >
+            Hủy
+          </Button>
+          <Button
+            onClick={handleRejectStudent}
+            color="error"
+            variant="contained"
+            startIcon={<Close />}
+            disabled={rejectDialog.reason.trim() === ""}
+          >
+            Từ chối sinh viên
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

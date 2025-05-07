@@ -20,6 +20,12 @@ export const getTeacherClasses = (teacherId) =>
   axios.get(`/classes/teaching/teacher/${teacherId}`);
 export const getTeachingClassById = (id) =>
   axios.get(`/classes/teaching/${id}`);
+export const checkScheduleConflicts = (data) =>
+  axios.post(`/classes/teaching/check-conflicts`, data);
+export const createTeachingClass = (classData) =>
+  axios.post(`/classes/teaching`, classData);
+export const updateTeachingClass = (id, classData) =>
+  axios.put(`/classes/teaching/${id}`, classData);
 export const addStudentsToClass = (teachingClassId, studentIds) =>
   axios.post(`/classes/teaching/${teachingClassId}/students/batch`, {
     student_ids: studentIds,

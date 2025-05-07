@@ -248,7 +248,9 @@ exports.updateMainClass = async (req, res) => {
 // @access  Private (Admin)
 exports.deleteMainClass = async (req, res) => {
   try {
-    const mainClass = await MainClass.findByIdAndDelete(req.params.id);
+    const mainClassId = req.params.id;
+
+    const mainClass = await MainClass.findById(mainClassId);
 
     if (!mainClass) {
       return res.status(404).json({
@@ -257,15 +259,58 @@ exports.deleteMainClass = async (req, res) => {
       });
     }
 
+    // Kiểm tra quyền: Admin có thể xóa bất kỳ lớp nào.
+    // Giáo viên chỉ có thể xóa lớp chính mà họ làm cố vấn.
+    if (req.user.role === "teacher") {
+      if (
+        !mainClass.advisor_id ||
+        mainClass.advisor_id.toString() !== req.user.id.toString()
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Bạn không có quyền xóa lớp chính này vì bạn không phải là cố vấn của lớp.",
+        });
+      }
+    } else if (req.user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Bạn không có quyền thực hiện thao tác này.",
+      });
+    }
+
+    // 1. Cập nhật User: gỡ bỏ main_class_id của các sinh viên thuộc lớp này
+    await User.updateMany(
+      { main_class_id: mainClassId },
+      { $unset: { main_class_id: "" } }
+    );
+
+    // 2. Cập nhật TeachingClass: đặt main_class_id thành null
+    await TeachingClass.updateMany(
+      { main_class_id: mainClassId },
+      { $set: { main_class_id: null } }
+    );
+
+    // 3. Xóa Notification liên quan đến việc phê duyệt/từ chối vào lớp này
+    await Notification.deleteMany({
+      $or: [{ type: "class_approval", "data.class_id": mainClassId }],
+    });
+
+    // 4. Xóa Lớp chính
+    await MainClass.findByIdAndDelete(mainClassId);
+
     res.status(200).json({
       success: true,
-      message: "Xóa lớp chính thành công",
+      message: "Xóa lớp chính và các dữ liệu liên quan thành công",
     });
   } catch (error) {
-    console.error(error);
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Lỗi khi xóa lớp chính:", error);
     res.status(500).json({
       success: false,
-      message: "Lỗi máy chủ",
+      message: "Lỗi máy chủ khi xóa lớp chính",
+      error: error.message,
     });
   }
 };
@@ -361,9 +406,10 @@ exports.getAllTeachingClasses = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const search = req.query.search || "";
-    const subject = req.query.subject_id || "";
-    const semester_id = req.query.semester_id || "";
-    const mainClass = req.query.main_class_id || "";
+    const subjectId = req.query.subject_id || ""; // Renamed for clarity
+    const teacherId = req.query.teacher_id || ""; // Added teacher_id
+    const semesterId = req.query.semester || ""; // Changed to read from req.query.semester
+    const mainClassId = req.query.main_class_id || ""; // Renamed for clarity
 
     const query = {};
 
@@ -371,16 +417,21 @@ exports.getAllTeachingClasses = async (req, res) => {
       query.$or = [{ class_name: { $regex: search, $options: "i" } }];
     }
 
-    if (subject) {
-      query.subject_id = subject;
+    if (subjectId) {
+      query.subject_id = subjectId;
     }
 
-    if (semester_id) {
-      query.semester_id = semester_id;
+    if (teacherId) {
+      // Added filter for teacher_id
+      query.teacher_id = teacherId;
     }
 
-    if (mainClass) {
-      query.main_class_id = mainClass;
+    if (semesterId) {
+      query.semester_id = semesterId;
+    }
+
+    if (mainClassId) {
+      query.main_class_id = mainClassId;
     }
 
     const total = await TeachingClass.countDocuments(query);
@@ -489,22 +540,57 @@ exports.getTeachingClassesByTeacher = async (req, res) => {
   try {
     const teacherId = req.params.id;
     const semester_id = req.query.semester_id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const search = req.query.search || "";
 
     const query = { teacher_id: teacherId };
 
     if (semester_id) {
+      if (!mongoose.Types.ObjectId.isValid(semester_id)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "ID học kỳ không hợp lệ" });
+      }
       query.semester_id = semester_id;
     }
 
+    // Thêm điều kiện tìm kiếm nếu có
+    if (search) {
+      const searchRegex = { $regex: search, $options: "i" };
+      // Chúng ta cần tìm kiếm trên các trường của TeachingClass và các trường của Subject (thông qua populate)
+      // Để làm điều này hiệu quả với populate, chúng ta sẽ query TeachingClass trước, sau đó filter
+      // Hoặc sử dụng aggregation pipeline. Ở đây, chúng ta sẽ dùng một cách tiếp cận đơn giản hơn
+      // là query tất cả class của teacher trong kỳ đó, rồi filter sau.
+      // Tuy nhiên, để tối ưu hơn, chúng ta nên tìm cách filter ở mức database.
+      // Một cách là tìm các subject_id phù hợp trước, sau đó query TeachingClass.
+
+      const subjectIds = await mongoose
+        .model("Subject")
+        .find({
+          $or: [{ name: searchRegex }, { code: searchRegex }],
+        })
+        .select("_id");
+
+      query.$or = [
+        { class_name: searchRegex },
+        { class_code: searchRegex },
+        { subject_id: { $in: subjectIds.map((s) => s._id) } },
+      ];
+    }
+
+    const total = await TeachingClass.countDocuments(query);
     const teachingClasses = await TeachingClass.find(query)
-      .populate("subject_id", "name code")
+      .populate("subject_id", "name code credits") // Thêm credits
       .populate("teacher_id", "full_name email")
       .populate("main_class_id", "name class_code")
-      .populate("semester_id", "name year")
+      .populate("semester_id", "name year start_date end_date") // Thêm start_date, end_date
       .populate({
         path: "students",
         select: "full_name email school_info.student_id",
       })
+      .skip((page - 1) * limit)
+      .limit(limit)
       .sort({ createdAt: -1 });
 
     // Tính trạng thái của lớp học dựa vào học kỳ
@@ -512,9 +598,14 @@ exports.getTeachingClassesByTeacher = async (req, res) => {
       teachingClasses.map(async (cls) => {
         const classObj = cls.toObject();
 
-        // Thêm trường is_active dựa vào thông tin semester
-        if (classObj.semester_id) {
+        // Thêm trường is_active và status dựa vào thông tin semester
+        if (
+          classObj.semester_id &&
+          classObj.semester_id.start_date &&
+          classObj.semester_id.end_date
+        ) {
           const currentDate = new Date();
+          // Đảm bảo rằng start_date và end_date là đối tượng Date
           const startDate = new Date(classObj.semester_id.start_date);
           const endDate = new Date(classObj.semester_id.end_date);
 
@@ -529,8 +620,27 @@ exports.getTeachingClassesByTeacher = async (req, res) => {
             classObj.status = "đang học";
           }
         } else {
-          classObj.is_active = false;
+          classObj.is_active = false; // Mặc định nếu không có thông tin học kỳ
           classObj.status = "không xác định";
+        }
+
+        // Đảm bảo subject_id, teacher_id, semester_id không null trước khi truy cập
+        if (classObj.subject_id === null) {
+          classObj.subject_id = { name: "N/A", code: "N/A", credits: 0 };
+        }
+        if (classObj.teacher_id === null) {
+          classObj.teacher_id = { full_name: "N/A", email: "N/A" };
+        }
+        if (classObj.semester_id === null) {
+          classObj.semester_id = {
+            name: "N/A",
+            year: "N/A",
+            start_date: null,
+            end_date: null,
+          };
+        }
+        if (classObj.main_class_id === null) {
+          classObj.main_class_id = { name: "N/A", class_code: "N/A" };
         }
 
         return classObj;
@@ -539,7 +649,10 @@ exports.getTeachingClassesByTeacher = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      count: classesWithStatus.length,
+      count: classesWithStatus.length, // Số lượng bản ghi trên trang hiện tại
+      total, // Tổng số bản ghi khớp với query
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
       data: classesWithStatus,
     });
   } catch (error) {
@@ -751,11 +864,56 @@ exports.createTeachingClass = async (req, res) => {
       total_sessions,
       students,
       schedule,
-      room_id,
       course_start_date,
       course_end_date,
       auto_generate_sessions,
     } = req.body;
+
+    // Kiểm tra học kỳ tồn tại
+    const semester = await Semester.findById(semester_id);
+    if (!semester) {
+      return res.status(400).json({
+        success: false,
+        message: "Học kỳ không tồn tại",
+      });
+    }
+
+    // Kiểm tra thời gian khóa học phải nằm trong khoảng thời gian của học kỳ
+    if (course_start_date && course_end_date) {
+      const startDate = new Date(course_start_date);
+      const endDate = new Date(course_end_date);
+      const semesterStartDate = new Date(semester.start_date);
+      const semesterEndDate = new Date(semester.end_date);
+
+      if (startDate < semesterStartDate || endDate > semesterEndDate) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Thời gian khóa học phải nằm trong khoảng thời gian của học kỳ",
+          details: {
+            semester_start: semester.start_date,
+            semester_end: semester.end_date,
+            course_start: course_start_date,
+            course_end: course_end_date,
+          },
+        });
+      }
+    }
+
+    // <<< Thêm Validation: Kiểm tra room_id trong từng schedule item >>>
+    if (schedule && Array.isArray(schedule)) {
+      for (const item of schedule) {
+        if (!item.room_id) {
+          return res.status(400).json({
+            success: false,
+            message: `Vui lòng chọn phòng học cho buổi học vào ${getDayOfWeekName(
+              item.day_of_week
+            )}`, // Có thể thêm thông tin tiết học
+          });
+        }
+      }
+    }
+    // <<< Kết thúc Validation >>>
 
     const teachingClass = await TeachingClass.create({
       class_name,
@@ -767,7 +925,6 @@ exports.createTeachingClass = async (req, res) => {
       total_sessions: total_sessions || 15,
       students: students || [],
       schedule: schedule || [],
-      room_id,
       course_start_date,
       course_end_date,
       auto_generate_sessions:
@@ -815,7 +972,6 @@ exports.updateTeachingClass = async (req, res) => {
       total_sessions,
       schedule,
       students,
-      room_id,
       course_start_date,
       course_end_date,
       auto_generate_sessions,
@@ -841,6 +997,55 @@ exports.updateTeachingClass = async (req, res) => {
       });
     }
 
+    // Kiểm tra học kỳ và thời gian khóa học
+    const semesterId = semester_id || teachingClass.semester_id;
+
+    // Lấy thông tin học kỳ
+    const semester = await Semester.findById(semesterId);
+    if (!semester) {
+      return res.status(400).json({
+        success: false,
+        message: "Học kỳ không tồn tại",
+      });
+    }
+
+    // Kiểm tra thời gian khóa học phải nằm trong khoảng thời gian của học kỳ
+    if (course_start_date && course_end_date) {
+      const startDate = new Date(course_start_date);
+      const endDate = new Date(course_end_date);
+      const semesterStartDate = new Date(semester.start_date);
+      const semesterEndDate = new Date(semester.end_date);
+
+      if (startDate < semesterStartDate || endDate > semesterEndDate) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Thời gian khóa học phải nằm trong khoảng thời gian của học kỳ",
+          details: {
+            semester_start: semester.start_date,
+            semester_end: semester.end_date,
+            course_start: course_start_date,
+            course_end: course_end_date,
+          },
+        });
+      }
+    }
+
+    // <<< Thêm Validation: Kiểm tra room_id trong từng schedule item >>>
+    if (schedule && Array.isArray(schedule)) {
+      for (const item of schedule) {
+        if (!item.room_id) {
+          return res.status(400).json({
+            success: false,
+            message: `Vui lòng chọn phòng học cho buổi học vào ${getDayOfWeekName(
+              item.day_of_week
+            )}`, // Có thể thêm thông tin tiết học
+          });
+        }
+      }
+    }
+    // <<< Kết thúc Validation >>>
+
     const updateData = {
       class_name,
       class_code,
@@ -851,7 +1056,6 @@ exports.updateTeachingClass = async (req, res) => {
       total_sessions,
       schedule,
       students,
-      room_id,
       course_start_date,
       course_end_date,
       updated_at: Date.now(),
@@ -895,10 +1099,11 @@ exports.updateTeachingClass = async (req, res) => {
 
 // @desc    Xóa lớp giảng dạy
 // @route   DELETE /api/classes/teaching/:id
-// @access  Private (Admin)
+// @access  Private (Admin, Teacher)
 exports.deleteTeachingClass = async (req, res) => {
   try {
-    const teachingClass = await TeachingClass.findByIdAndDelete(req.params.id);
+    const classId = req.params.id;
+    const teachingClass = await TeachingClass.findById(classId);
 
     if (!teachingClass) {
       return res.status(404).json({
@@ -907,17 +1112,255 @@ exports.deleteTeachingClass = async (req, res) => {
       });
     }
 
+    // Kiểm tra quyền: Admin hoặc giáo viên được phân công của lớp đó
+    if (
+      req.user.role !== "admin" &&
+      teachingClass.teacher_id.toString() !== req.user.id.toString()
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Bạn không có quyền xóa lớp giảng dạy này",
+      });
+    }
+
+    // Xóa các AttendanceSession liên quan
+    const sessions = await AttendanceSession.find({
+      teaching_class_id: classId,
+    });
+    const sessionIds = sessions.map((s) => s._id);
+
+    // Xóa AttendanceLog liên quan đến các session đó
+    if (sessionIds.length > 0) {
+      await AttendanceLog.deleteMany({ session_id: { $in: sessionIds } });
+    }
+    await AttendanceSession.deleteMany({ teaching_class_id: classId });
+
+    // Xóa StudentScore liên quan
+    await StudentScore.deleteMany({ teaching_class_id: classId });
+
+    // (Tùy chọn) Xóa Notification liên quan (nếu có)
+    // Ví dụ: await Notification.deleteMany({ "data.teaching_class_id": classId });
+
+    // Cuối cùng, xóa lớp giảng dạy
+    await TeachingClass.findByIdAndDelete(classId);
+
     res.status(200).json({
       success: true,
-      message: "Xóa lớp giảng dạy thành công",
+      message: "Xóa lớp giảng dạy và các dữ liệu liên quan thành công",
     });
   } catch (error) {
-    console.error(error);
+    console.error("Lỗi khi xóa lớp giảng dạy:", error);
     res.status(500).json({
       success: false,
-      message: "Lỗi máy chủ",
+      message: "Lỗi máy chủ khi xóa lớp giảng dạy",
+      error: error.message,
     });
   }
+};
+
+// @desc    Kiểm tra xung đột lịch học
+// @route   POST /api/classes/teaching/check-conflicts
+// @access  Private
+exports.checkScheduleConflicts = async (req, res) => {
+  try {
+    const { teacher_id, schedule, class_id } = req.body;
+
+    if (
+      !teacher_id ||
+      !schedule ||
+      !Array.isArray(schedule) ||
+      schedule.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Thiếu thông tin cần thiết để kiểm tra xung đột lịch",
+      });
+    }
+
+    // Mảng lưu các xung đột tìm thấy
+    const conflicts = [];
+
+    // 1. Kiểm tra xung đột lịch của giáo viên
+    for (const scheduleItem of schedule) {
+      const { day_of_week, start_time, end_time, room_id } = scheduleItem;
+
+      if (!day_of_week || !start_time || !end_time || !room_id) {
+        continue; // Bỏ qua các mục không đầy đủ thông tin
+      }
+
+      // Chuẩn bị query để tìm các lớp có lịch trùng với lịch mới
+      const teacherClassesQuery = {
+        teacher_id,
+        schedule: {
+          $elemMatch: {
+            day_of_week: day_of_week,
+            $or: [
+              {
+                // Trường hợp lịch mới bắt đầu trong khoảng thời gian của lịch hiện có
+                start_time: { $lte: start_time },
+                end_time: { $gte: start_time },
+              },
+              {
+                // Trường hợp lịch mới kết thúc trong khoảng thời gian của lịch hiện có
+                start_time: { $lte: end_time },
+                end_time: { $gte: end_time },
+              },
+              {
+                // Trường hợp lịch mới bao trùm lịch hiện có
+                start_time: { $gte: start_time },
+                end_time: { $lte: end_time },
+              },
+            ],
+          },
+        },
+      };
+
+      // Nếu đang cập nhật lớp học hiện có, loại trừ lớp đó khỏi kết quả kiểm tra
+      if (class_id) {
+        teacherClassesQuery._id = { $ne: class_id };
+      }
+
+      const teacherConflicts = await TeachingClass.find(teacherClassesQuery)
+        .populate("subject_id", "name code")
+        .select("class_name class_code subject_id schedule");
+
+      if (teacherConflicts.length > 0) {
+        teacherConflicts.forEach((conflictClass) => {
+          // Tìm chính xác lịch học bị xung đột
+          const conflictSchedule = conflictClass.schedule.find(
+            (item) =>
+              item.day_of_week === day_of_week &&
+              ((item.start_time <= start_time && item.end_time >= start_time) ||
+                (item.start_time <= end_time && item.end_time >= end_time) ||
+                (item.start_time >= start_time && item.end_time <= end_time))
+          );
+
+          if (conflictSchedule) {
+            conflicts.push({
+              type: "teacher",
+              day_of_week,
+              time: `${conflictSchedule.start_time} - ${conflictSchedule.end_time}`,
+              class_info: {
+                id: conflictClass._id,
+                name: conflictClass.class_name,
+                code: conflictClass.class_code,
+                subject: conflictClass.subject_id?.name || "Không xác định",
+              },
+              message: `Giáo viên đã có lịch dạy lớp ${
+                conflictClass.class_name
+              } (${
+                conflictClass.subject_id?.name || "Không xác định"
+              }) vào ${getDayOfWeekName(day_of_week)} lúc ${
+                conflictSchedule.start_time
+              } - ${conflictSchedule.end_time}`,
+            });
+          }
+        });
+      }
+
+      // 2. Kiểm tra xung đột lịch của phòng học
+      const roomQuery = {
+        schedule: {
+          $elemMatch: {
+            room_id: new mongoose.Types.ObjectId(room_id),
+            day_of_week: day_of_week,
+            $or: [
+              {
+                start_time: { $lte: start_time },
+                end_time: { $gte: start_time },
+              },
+              {
+                start_time: { $lte: end_time },
+                end_time: { $gte: end_time },
+              },
+              {
+                start_time: { $gte: start_time },
+                end_time: { $lte: end_time },
+              },
+            ],
+          },
+        },
+      };
+
+      // Nếu đang cập nhật lớp học hiện có, loại trừ lớp đó khỏi kết quả kiểm tra
+      if (class_id) {
+        roomQuery._id = { $ne: class_id };
+      }
+
+      const roomConflicts = await TeachingClass.find(roomQuery)
+        .populate("subject_id", "name code")
+        .populate("teacher_id", "full_name")
+        .select("class_name class_code subject_id teacher_id schedule");
+
+      if (roomConflicts.length > 0) {
+        roomConflicts.forEach((conflictClass) => {
+          // Tìm chính xác lịch học bị xung đột
+          const conflictSchedule = conflictClass.schedule.find(
+            (item) =>
+              item.room_id.toString() === room_id.toString() &&
+              item.day_of_week === day_of_week &&
+              ((item.start_time <= start_time && item.end_time >= start_time) ||
+                (item.start_time <= end_time && item.end_time >= end_time) ||
+                (item.start_time >= start_time && item.end_time <= end_time))
+          );
+
+          if (conflictSchedule) {
+            conflicts.push({
+              type: "room",
+              day_of_week,
+              time: `${conflictSchedule.start_time} - ${conflictSchedule.end_time}`,
+              room_id,
+              class_info: {
+                id: conflictClass._id,
+                name: conflictClass.class_name,
+                code: conflictClass.class_code,
+                subject: conflictClass.subject_id?.name || "Không xác định",
+                teacher:
+                  conflictClass.teacher_id?.full_name || "Không xác định",
+              },
+              message: `Phòng học đã được đặt cho lớp ${
+                conflictClass.class_name
+              } (${
+                conflictClass.subject_id?.name || "Không xác định"
+              }) của giảng viên ${
+                conflictClass.teacher_id?.full_name || "Không xác định"
+              } vào ${getDayOfWeekName(day_of_week)} lúc ${
+                conflictSchedule.start_time
+              } - ${conflictSchedule.end_time}`,
+            });
+          }
+        });
+      }
+    }
+
+    // Trả về kết quả kiểm tra
+    res.status(200).json({
+      success: true,
+      has_conflicts: conflicts.length > 0,
+      conflicts,
+    });
+  } catch (error) {
+    console.error("Lỗi khi kiểm tra xung đột lịch học:", error);
+    res.status(500).json({
+      success: false,
+      message: "Lỗi máy chủ khi kiểm tra xung đột lịch học",
+      error: error.message,
+    });
+  }
+};
+
+// Hàm hỗ trợ để lấy tên thứ trong tuần từ số
+const getDayOfWeekName = (day) => {
+  const days = [
+    "Chủ nhật",
+    "Thứ hai",
+    "Thứ ba",
+    "Thứ tư",
+    "Thứ năm",
+    "Thứ sáu",
+    "Thứ bảy",
+  ];
+  return days[day] || "Không xác định";
 };
 
 // Hàm hỗ trợ tạo các buổi điểm danh dựa vào lịch học
@@ -1025,11 +1468,11 @@ async function createAttendanceSession(
     teaching_class_id: teachingClass._id,
     session_number: sessionNumber,
     date: sessionDate,
-    room: scheduleItem.room_id || teachingClass.room_id,
+    room: scheduleItem.room_id,
     start_time: startTime,
     end_time: endTime,
     status: "pending",
-    students_absent: [...teachingClass.students], // Mặc định tất cả sinh viên vắng mặt
+    students_absent: [...teachingClass.students],
   });
 }
 
@@ -1315,10 +1758,9 @@ exports.addStudentsBatch = async (req, res) => {
 // @access  Private (Admin, Teacher)
 exports.removeStudentFromClass = async (req, res) => {
   try {
-    const classId = req.params.id;
-    const studentId = req.params.studentId;
+    const { id: classId, studentId } = req.params; // Ensure classId is used consistently
 
-    const teachingClass = await TeachingClass.findById(classId);
+    const teachingClass = await TeachingClass.findById(classId); // Use classId
 
     if (!teachingClass) {
       return res.status(404).json({
@@ -1346,22 +1788,51 @@ exports.removeStudentFromClass = async (req, res) => {
       });
     }
 
-    // Xóa sinh viên khỏi lớp
+    // 1. Xóa sinh viên khỏi mảng students của TeachingClass
     teachingClass.students = teachingClass.students.filter(
       (id) => id.toString() !== studentId
     );
     await teachingClass.save();
 
+    // 2. Xóa StudentScore liên quan
+    await StudentScore.deleteOne({
+      teaching_class_id: classId, // Use classId
+      student_id: studentId,
+    });
+
+    // 3. Xóa AttendanceLog và cập nhật AttendanceSession
+    const sessions = await AttendanceSession.find({
+      teaching_class_id: classId, // Use classId
+    });
+
+    for (const session of sessions) {
+      // Xóa AttendanceLog của sinh viên này trong buổi học này
+      await AttendanceLog.deleteMany({
+        session_id: session._id,
+        student_id: studentId,
+      });
+
+      // Cập nhật mảng students_present và students_absent trong AttendanceSession
+      session.students_present = session.students_present.filter(
+        (id) => id.toString() !== studentId
+      );
+      session.students_absent = session.students_absent.filter(
+        (id) => id.toString() !== studentId
+      );
+      await session.save();
+    }
+
     res.status(200).json({
       success: true,
-      message: "Xóa sinh viên khỏi lớp thành công",
-      data: teachingClass,
+      message: "Xóa sinh viên khỏi lớp và các dữ liệu liên quan thành công",
+      data: teachingClass, // Trả về thông tin lớp đã cập nhật
     });
   } catch (error) {
-    console.error(error);
+    console.error("Lỗi khi xóa sinh viên khỏi lớp giảng dạy:", error);
     res.status(500).json({
       success: false,
-      message: "Lỗi máy chủ",
+      message: "Lỗi máy chủ khi xóa sinh viên",
+      error: error.message,
     });
   }
 };
@@ -2017,6 +2488,71 @@ exports.getClassAttendanceStats = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Lỗi server khi lấy thống kê điểm danh",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Xóa sinh viên khỏi lớp chính và cập nhật các liên kết
+// @route   DELETE /api/classes/main/:id/students/:studentId
+// @access  Private (Admin, Advisor)
+exports.removeStudentFromMainClass = async (req, res) => {
+  try {
+    const { id: classId, studentId } = req.params;
+
+    const mainClass = await MainClass.findById(classId);
+    if (!mainClass) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy lớp chính",
+      });
+    }
+
+    // Kiểm tra quyền: Admin hoặc Cố vấn của lớp
+    if (
+      req.user.role !== "admin" &&
+      (!mainClass.advisor_id || mainClass.advisor_id.toString() !== req.user.id)
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Bạn không có quyền xóa sinh viên khỏi lớp này",
+      });
+    }
+
+    // Kiểm tra sinh viên có trong lớp không
+    if (!mainClass.students.map((s) => s.toString()).includes(studentId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Sinh viên không có trong lớp chính này",
+      });
+    }
+
+    // 1. Xóa sinh viên khỏi mảng students của MainClass
+    mainClass.students = mainClass.students.filter(
+      (sId) => sId.toString() !== studentId
+    );
+    await mainClass.save();
+
+    // 2. Cập nhật User: xóa main_class_id của sinh viên
+    await User.findByIdAndUpdate(studentId, { $unset: { main_class_id: "" } });
+
+    // 3. (Tùy chọn) Xóa Notification liên quan đến việc phê duyệt vào lớp này
+    // Ví dụ: xóa thông báo có type 'class_approval' và data.class_id là classId
+    await Notification.deleteMany({
+      recipient_id: studentId,
+      type: "class_approval", // Đảm bảo type này là đúng
+      "data.class_id": classId,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Xóa sinh viên khỏi lớp chính và cập nhật liên kết thành công",
+    });
+  } catch (error) {
+    console.error("Lỗi khi xóa sinh viên khỏi lớp chính:", error);
+    res.status(500).json({
+      success: false,
+      message: "Lỗi máy chủ khi xóa sinh viên khỏi lớp chính",
       error: error.message,
     });
   }
