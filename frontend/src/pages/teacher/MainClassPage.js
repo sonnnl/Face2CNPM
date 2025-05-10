@@ -76,6 +76,8 @@ import {
   Edit,
   DeleteForever,
   Group,
+  Business,
+  HelpOutline,
 } from "@mui/icons-material";
 import InfoIcon from "@mui/icons-material/Info";
 import RefreshIcon from "@mui/icons-material/Refresh";
@@ -141,13 +143,18 @@ const TeacherMainClassPage = () => {
   const [openAddClassDialog, setOpenAddClassDialog] = useState(false);
   const [newClass, setNewClass] = useState({
     name: "",
-    code: "",
-    department_id: "",
+    class_code: "",
+    selected_department_id: "",
+    major_id: "",
     advisor_id: user?._id || "",
     students: [],
+    year_start: new Date().getFullYear(),
+    year_end: new Date().getFullYear() + 4,
   });
   const [departments, setDepartments] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [majorsForSelectedDept, setMajorsForSelectedDept] = useState([]);
+  const [isLoadingMajors, setIsLoadingMajors] = useState(false);
 
   // Phân trang
   const [page, setPage] = useState(0);
@@ -433,7 +440,10 @@ const TeacherMainClassPage = () => {
               {user &&
                 mainClass &&
                 mainClass.advisor_id &&
-                user._id === mainClass.advisor_id._id && (
+                user._id ===
+                  (typeof mainClass.advisor_id === "string"
+                    ? mainClass.advisor_id
+                    : mainClass.advisor_id._id) && (
                   <Tooltip title="Xóa Lớp Chủ Nhiệm Này">
                     <IconButton
                       color="error"
@@ -474,17 +484,60 @@ const TeacherMainClassPage = () => {
                     secondary={mainClass.class_code}
                   />
                 </ListItem>
-                {mainClass.department_id && (
-                  <ListItem disableGutters>
-                    <ListItemIcon sx={{ minWidth: 32 }}>
-                      <School fontSize="small" />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary="Khoa:"
-                      secondary={mainClass.department_id.name}
-                    />
-                  </ListItem>
+                {mainClass.major_id && (
+                  <>
+                    <ListItem disableGutters>
+                      <ListItemIcon sx={{ minWidth: 32 }}>
+                        <School fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Ngành:"
+                        secondary={
+                          mainClass.major_id.name
+                            ? `${mainClass.major_id.name} (${
+                                mainClass.major_id.code || "N/A"
+                              })`
+                            : "N/A"
+                        }
+                      />
+                    </ListItem>
+                    {mainClass.major_id.department_id && (
+                      <ListItem disableGutters>
+                        <ListItemIcon sx={{ minWidth: 32 }}>
+                          <Business sx={{ fontSize: "1.25rem" }} />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary="Khoa:"
+                          secondary={
+                            mainClass.major_id.department_id.name
+                              ? `${mainClass.major_id.department_id.name} (${
+                                  mainClass.major_id.department_id.code || "N/A"
+                                })`
+                              : "N/A"
+                          }
+                        />
+                      </ListItem>
+                    )}
+                  </>
                 )}
+                <ListItem disableGutters>
+                  <ListItemIcon sx={{ minWidth: 32 }}>
+                    <AccessTime fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Năm bắt đầu:"
+                    secondary={mainClass.year_start || "Chưa cập nhật"}
+                  />
+                </ListItem>
+                <ListItem disableGutters>
+                  <ListItemIcon sx={{ minWidth: 32 }}>
+                    <AccessTime fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Năm kết thúc:"
+                    secondary={mainClass.year_end || "Chưa cập nhật"}
+                  />
+                </ListItem>
                 <ListItem disableGutters>
                   <ListItemIcon sx={{ minWidth: 32 }}>
                     <Group fontSize="small" />
@@ -560,8 +613,13 @@ const TeacherMainClassPage = () => {
   };
 
   // Xem chi tiết sinh viên
-  const handleViewStudent = (studentId) => {
-    navigate(`/profile/${studentId}`);
+  const handleViewStudent = (studentIdOrObject) => {
+    if (typeof studentIdOrObject === "string") {
+      navigate(`/profile/${studentIdOrObject}`);
+    } else if (studentIdOrObject && studentIdOrObject._id) {
+      setSelectedStudent(studentIdOrObject);
+      setOpenStudentDetail(true);
+    }
   };
 
   // Render khi đang tải dữ liệu
@@ -650,20 +708,50 @@ const TeacherMainClassPage = () => {
     setOpenAddClassDialog(false);
     setNewClass({
       name: "",
-      code: "",
-      department_id: "",
+      class_code: "",
+      selected_department_id: "",
+      major_id: "",
       advisor_id: user?._id || "",
       students: [],
+      year_start: new Date().getFullYear(),
+      year_end: new Date().getFullYear() + 4,
     });
+    setMajorsForSelectedDept([]);
   };
 
   // Xử lý thay đổi thông tin lớp mới
-  const handleNewClassChange = (e) => {
+  const handleNewClassChange = async (e) => {
     const { name, value } = e.target;
     setNewClass((prev) => ({
       ...prev,
       [name]: value,
     }));
+
+    if (name === "selected_department_id") {
+      setNewClass((prev) => ({ ...prev, major_id: "" }));
+      setMajorsForSelectedDept([]);
+      if (value) {
+        setIsLoadingMajors(true);
+        try {
+          const response = await axios.get(
+            `${API_URL}/majors?department_id=${value}`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+          setMajorsForSelectedDept(response.data.data || []);
+        } catch (err) {
+          console.error("Failed to fetch majors:", err);
+          enqueueSnackbar(
+            "Không thể tải danh sách ngành học cho khoa đã chọn.",
+            { variant: "error" }
+          );
+          setMajorsForSelectedDept([]);
+        } finally {
+          setIsLoadingMajors(false);
+        }
+      }
+    }
   };
 
   // Xử lý tạo lớp chính mới
@@ -671,28 +759,39 @@ const TeacherMainClassPage = () => {
     try {
       setIsSubmitting(true);
 
+      const parsedYearStart = parseInt(newClass.year_start, 10);
+      const parsedYearEnd = parseInt(newClass.year_end, 10);
+
       // Kiểm tra các trường bắt buộc
-      if (!newClass.name || !newClass.code || !newClass.department_id) {
-        // enqueueSnackbar("Vui lòng điền đầy đủ thông tin", {
-        //   variant: "warning",
-        // });
+      if (
+        !newClass.name ||
+        !newClass.class_code ||
+        !newClass.major_id ||
+        isNaN(parsedYearStart)
+      ) {
+        enqueueSnackbar(
+          "Vui lòng điền đầy đủ thông tin: Tên lớp, Mã lớp, Khoa, Ngành, Năm bắt đầu (phải là số hợp lệ).",
+          {
+            variant: "warning",
+          }
+        );
         setIsSubmitting(false);
         return;
       }
 
-      const response = await axios.post(
-        `${API_URL}/classes/main`,
-        {
-          name: newClass.name,
-          code: newClass.code,
-          department_id: newClass.department_id,
-          advisor_id: newClass.advisor_id,
-          students: newClass.students,
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const payload = {
+        name: newClass.name,
+        class_code: newClass.class_code,
+        major_id: newClass.major_id,
+        advisor_id: newClass.advisor_id,
+        year_start: parsedYearStart,
+        year_end: isNaN(parsedYearEnd) ? undefined : parsedYearEnd, // Send undefined if NaN
+      };
+      console.log("Creating Main Class with payload:", payload);
+
+      const response = await axios.post(`${API_URL}/classes/main`, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
       // enqueueSnackbar("Tạo lớp chính thành công", { variant: "success" });
       handleCloseAddClassDialog();
@@ -1054,14 +1153,41 @@ const TeacherMainClassPage = () => {
   );
 
   // Mở dialog chỉnh sửa lớp chính
-  const handleOpenEditClassDialog = () => {
+  const handleOpenEditClassDialog = async () => {
     if (!mainClass) return;
+
+    const initialSelectedDepartmentId =
+      mainClass.major_id?.department_id?._id || "";
 
     setEditClassData({
       name: mainClass.name || "",
-      code: mainClass.class_code || "",
-      department_id: mainClass.department_id?._id || "",
+      class_code: mainClass.class_code || "",
+      major_id: mainClass.major_id?._id || "",
+      selected_department_id: initialSelectedDepartmentId,
+      year_start: mainClass.year_start || new Date().getFullYear(),
+      year_end: mainClass.year_end || new Date().getFullYear() + 4,
     });
+
+    setMajorsForSelectedDept([]);
+    if (initialSelectedDepartmentId) {
+      setIsLoadingMajors(true);
+      try {
+        const response = await axios.get(
+          `${API_URL}/majors?department_id=${initialSelectedDepartmentId}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        setMajorsForSelectedDept(response.data.data || []);
+      } catch (err) {
+        console.error("Failed to fetch majors for editing:", err);
+        enqueueSnackbar("Lỗi tải ngành học cho khoa hiện tại.", {
+          variant: "error",
+        });
+      } finally {
+        setIsLoadingMajors(false);
+      }
+    }
 
     setOpenEditClassDialog(true);
   };
@@ -1070,15 +1196,42 @@ const TeacherMainClassPage = () => {
   const handleCloseEditClassDialog = () => {
     setOpenEditClassDialog(false);
     setEditClassData(null);
+    setMajorsForSelectedDept([]);
   };
 
   // Xử lý thay đổi trong form chỉnh sửa
-  const handleEditClassChange = (e) => {
+  const handleEditClassChange = async (e) => {
     const { name, value } = e.target;
     setEditClassData((prev) => ({
       ...prev,
       [name]: value,
     }));
+
+    if (name === "selected_department_id") {
+      setEditClassData((prev) => ({ ...prev, major_id: "" }));
+      setMajorsForSelectedDept([]);
+      if (value) {
+        setIsLoadingMajors(true);
+        try {
+          const response = await axios.get(
+            `${API_URL}/majors?department_id=${value}`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+          setMajorsForSelectedDept(response.data.data || []);
+        } catch (err) {
+          console.error("Failed to fetch majors:", err);
+          enqueueSnackbar(
+            "Không thể tải danh sách ngành học cho khoa đã chọn.",
+            { variant: "error" }
+          );
+          setMajorsForSelectedDept([]);
+        } finally {
+          setIsLoadingMajors(false);
+        }
+      }
+    }
   };
 
   // Cập nhật thông tin lớp chính
@@ -1086,26 +1239,38 @@ const TeacherMainClassPage = () => {
     try {
       setIsSubmittingEdit(true);
 
+      const parsedEditYearStart = parseInt(editClassData.year_start, 10);
+      const parsedEditYearEnd = parseInt(editClassData.year_end, 10);
+
       // Kiểm tra các trường bắt buộc
       if (
         !editClassData.name ||
-        !editClassData.code ||
-        !editClassData.department_id
+        !editClassData.class_code ||
+        !editClassData.major_id ||
+        isNaN(parsedEditYearStart)
       ) {
-        // enqueueSnackbar("Vui lòng điền đầy đủ thông tin", {
-        //   variant: "warning",
-        // });
+        enqueueSnackbar(
+          "Vui lòng điền đầy đủ thông tin: Tên lớp, Mã lớp, Khoa, Ngành, Năm bắt đầu (phải là số hợp lệ).",
+          {
+            variant: "warning",
+          }
+        );
         setIsSubmittingEdit(false);
         return;
       }
 
+      const payload = {
+        name: editClassData.name,
+        class_code: editClassData.class_code,
+        major_id: editClassData.major_id,
+        year_start: parsedEditYearStart,
+        year_end: isNaN(parsedEditYearEnd) ? undefined : parsedEditYearEnd, // Send undefined if NaN
+      };
+      console.log("Updating Main Class with payload:", payload);
+
       const response = await axios.put(
         `${API_URL}/classes/main/${mainClass._id}`,
-        {
-          name: editClassData.name,
-          code: editClassData.code,
-          department_id: editClassData.department_id,
-        },
+        payload,
         {
           headers: { Authorization: `Bearer ${token}` },
         }
@@ -1969,23 +2134,52 @@ const TeacherMainClassPage = () => {
               <TextField
                 fullWidth
                 label="Mã lớp"
-                name="code"
-                value={newClass.code}
+                name="class_code"
+                value={newClass.class_code}
                 onChange={handleNewClassChange}
                 required
                 variant="outlined"
                 placeholder="Nhập mã lớp (VD: CNTT-K19)"
               />
             </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Năm bắt đầu"
+                name="year_start"
+                type="number"
+                value={newClass.year_start}
+                onChange={handleNewClassChange}
+                required
+                variant="outlined"
+                placeholder="VD: 2021"
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Năm kết thúc"
+                name="year_end"
+                type="number"
+                value={newClass.year_end}
+                onChange={handleNewClassChange}
+                required
+                variant="outlined"
+                placeholder="VD: 2025"
+              />
+            </Grid>
             <Grid item xs={12}>
               <FormControl fullWidth variant="outlined" required>
                 <InputLabel>Khoa</InputLabel>
                 <Select
-                  name="department_id"
-                  value={newClass.department_id}
+                  name="selected_department_id"
+                  value={newClass.selected_department_id}
                   onChange={handleNewClassChange}
                   label="Khoa"
                 >
+                  <MenuItem value="">
+                    <em>Chọn Khoa</em>
+                  </MenuItem>
                   {departments.map((department) => (
                     <MenuItem key={department._id} value={department._id}>
                       {department.name}
@@ -1995,27 +2189,46 @@ const TeacherMainClassPage = () => {
               </FormControl>
             </Grid>
             <Grid item xs={12}>
-              <FormControl fullWidth variant="outlined">
-                <InputLabel>Giáo viên cố vấn</InputLabel>
+              <FormControl
+                fullWidth
+                variant="outlined"
+                required
+                disabled={!newClass.selected_department_id || isLoadingMajors}
+              >
+                <InputLabel>Ngành</InputLabel>
                 <Select
-                  name="advisor_id"
-                  value={newClass.advisor_id}
+                  name="major_id"
+                  value={newClass.major_id}
                   onChange={handleNewClassChange}
-                  label="Giáo viên cố vấn"
-                  disabled
+                  label="Ngành"
                 >
-                  <MenuItem value={user?._id}>
-                    {user?.full_name || "Bạn"} (Giáo viên hiện tại)
+                  <MenuItem value="">
+                    <em>
+                      {isLoadingMajors
+                        ? "Đang tải ngành..."
+                        : newClass.selected_department_id
+                        ? "Chọn Ngành"
+                        : "Vui lòng chọn Khoa trước"}
+                    </em>
                   </MenuItem>
+                  {majorsForSelectedDept.map((major) => (
+                    <MenuItem key={major._id} value={major._id}>
+                      {major.name} ({major.code})
+                    </MenuItem>
+                  ))}
                 </Select>
-                <Typography
-                  variant="caption"
-                  color="textSecondary"
-                  sx={{ mt: 1 }}
-                >
-                  Mặc định là giáo viên hiện tại. Chỉ admin mới có thể thay đổi
-                  giáo viên cố vấn.
-                </Typography>
+                {isLoadingMajors && (
+                  <CircularProgress
+                    size={24}
+                    sx={{
+                      position: "absolute",
+                      top: "50%",
+                      left: "50%",
+                      marginTop: "-12px",
+                      marginLeft: "-12px",
+                    }}
+                  />
+                )}
               </FormControl>
             </Grid>
           </Grid>
@@ -2067,12 +2280,36 @@ const TeacherMainClassPage = () => {
                 <TextField
                   fullWidth
                   label="Mã lớp"
-                  name="code"
-                  value={editClassData.code}
+                  name="class_code"
+                  value={editClassData.class_code}
                   onChange={handleEditClassChange}
                   required
                   variant="outlined"
                   placeholder="VD: CNTT2021-1"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Năm bắt đầu"
+                  name="year_start"
+                  type="number"
+                  value={editClassData.year_start}
+                  onChange={handleEditClassChange}
+                  required
+                  variant="outlined"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Năm kết thúc"
+                  name="year_end"
+                  type="number"
+                  value={editClassData.year_end}
+                  onChange={handleEditClassChange}
+                  required
+                  variant="outlined"
                 />
               </Grid>
               <Grid item xs={12}>
@@ -2080,16 +2317,63 @@ const TeacherMainClassPage = () => {
                   <InputLabel>Khoa</InputLabel>
                   <Select
                     label="Khoa"
-                    name="department_id"
-                    value={editClassData.department_id}
+                    name="selected_department_id"
+                    value={editClassData.selected_department_id}
                     onChange={handleEditClassChange}
                   >
+                    <MenuItem value="">
+                      <em>Chọn Khoa</em>
+                    </MenuItem>
                     {departments.map((dept) => (
                       <MenuItem key={dept._id} value={dept._id}>
                         {dept.name}
                       </MenuItem>
                     ))}
                   </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12}>
+                <FormControl
+                  fullWidth
+                  required
+                  disabled={
+                    !editClassData.selected_department_id || isLoadingMajors
+                  }
+                >
+                  <InputLabel>Ngành</InputLabel>
+                  <Select
+                    label="Ngành"
+                    name="major_id"
+                    value={editClassData.major_id}
+                    onChange={handleEditClassChange}
+                  >
+                    <MenuItem value="">
+                      <em>
+                        {isLoadingMajors
+                          ? "Đang tải ngành..."
+                          : editClassData.selected_department_id
+                          ? "Chọn Ngành"
+                          : "Vui lòng chọn Khoa trước"}
+                      </em>
+                    </MenuItem>
+                    {majorsForSelectedDept.map((major) => (
+                      <MenuItem key={major._id} value={major._id}>
+                        {major.name} ({major.code})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                  {isLoadingMajors && (
+                    <CircularProgress
+                      size={24}
+                      sx={{
+                        position: "absolute",
+                        top: "50%",
+                        left: "50%",
+                        marginTop: "-12px",
+                        marginLeft: "-12px",
+                      }}
+                    />
+                  )}
                 </FormControl>
               </Grid>
             </Grid>

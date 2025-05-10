@@ -160,6 +160,12 @@ const MainLayout = () => {
           roles: ["admin"],
         },
         {
+          text: "Quản lý Ngành học",
+          icon: <School />,
+          path: "/admin/majors",
+          roles: ["admin"],
+        },
+        {
           text: "Quản lý học kỳ",
           icon: <CalendarToday />,
           path: "/admin/semesters",

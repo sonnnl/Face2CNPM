@@ -10,6 +10,7 @@ const buildingRoutes = require("./routes/building.routes");
 const roomRoutes = require("./routes/room.routes");
 const courseRegistrationRoutes = require("./routes/course-registration.routes");
 const teacherRoutes = require("./routes/teacherRoutes"); // Import teacher routes
+const majorRoutes = require("./routes/major.routes"); // Added import for major routes
 // ... possibly more routes ...
 
 // Setup middleware and cors
@@ -28,4 +29,5 @@ app.use("/api/buildings", buildingRoutes);
 app.use("/api/rooms", roomRoutes);
 app.use("/api/course-registration", courseRegistrationRoutes);
 app.use("/api/teachers", teacherRoutes); // Mount teacher routes
+app.use("/api/majors", majorRoutes); // Added route for majors
 // ... existing code ...

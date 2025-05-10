@@ -49,3 +49,18 @@ export const getStudentAttendance = (studentId, teachingClassId) =>
   axios.get(`/students/${studentId}/attendance`, {
     params: { teaching_class: teachingClassId },
   });
+
+// Department APIs (MỚI - nếu chưa có, hoặc để MajorsPage dùng)
+export const getDepartments = () => axios.get("/departments");
+
+// Major APIs (MỚI)
+export const getMajors = (departmentId = null) => {
+  let url = "/majors";
+  if (departmentId) {
+    url += `?department_id=${departmentId}`;
+  }
+  return axios.get(url);
+};
+export const createMajor = (data) => axios.post("/majors", data);
+export const updateMajor = (id, data) => axios.put(`/majors/${id}`, data);
+export const deleteMajor = (id) => axios.delete(`/majors/${id}`);

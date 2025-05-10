@@ -41,6 +41,7 @@ app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/users", require("./routes/user.routes"));
 app.use("/api/departments", require("./routes/department.routes"));
+app.use("/api/majors", require("./routes/major.routes"));
 app.use("/api/campuses", require("./routes/campus.routes"));
 app.use("/api/courses", require("./routes/course.routes"));
 app.use("/api/classes", require("./routes/class.routes"));

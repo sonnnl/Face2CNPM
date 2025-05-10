@@ -1,4 +1,5 @@
-const { User } = require("../models/schemas");
+const { User, Major, Department } = require("../models/schemas");
+const mongoose = require("mongoose");
 
 /**
  * @desc    Lấy tất cả người dùng
@@ -36,7 +37,15 @@ exports.getAllUsers = async (req, res) => {
       .sort({ created_at: -1 })
       .skip(skip)
       .limit(parseInt(limit))
-      .populate("advisor_id", "full_name email");
+      .populate("advisor_id", "full_name email")
+      .populate({
+        path: "school_info.major_id",
+        select: "name code department_id",
+        populate: {
+          path: "department_id",
+          select: "name code",
+        },
+      });
 
     const totalUsers = await User.countDocuments(query);
 
@@ -66,7 +75,15 @@ exports.getUserById = async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
       .select("-password")
-      .populate("advisor_id", "full_name email");
+      .populate("advisor_id", "full_name email")
+      .populate({
+        path: "school_info.major_id",
+        select: "name code department_id",
+        populate: {
+          path: "department_id",
+          select: "name code",
+        },
+      });
 
     if (!user) {
       return res.status(404).json({
@@ -123,11 +140,55 @@ exports.updateUser = async (req, res) => {
       });
     }
 
+    // Nếu cập nhật school_info và có major_id
+    if (updateData.school_info && updateData.school_info.major_id) {
+      const majorId = updateData.school_info.major_id;
+      if (!mongoose.Types.ObjectId.isValid(majorId)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "ID Ngành không hợp lệ." });
+      }
+      const majorExists = await Major.findById(majorId);
+      if (!majorExists) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Ngành học không tồn tại." });
+      }
+      // Xóa các trường department, department_id, major cũ nếu có trong school_info
+      if (updateData.school_info.department)
+        delete updateData.school_info.department;
+      if (updateData.school_info.department_id)
+        delete updateData.school_info.department_id;
+      if (updateData.school_info.major) delete updateData.school_info.major;
+    } else if (
+      updateData.school_info &&
+      user.role === "student" &&
+      !updateData.school_info.major_id
+    ) {
+      // Nếu là sinh viên và school_info được cập nhật nhưng không có major_id,
+      // thì xóa major_id hiện có (nếu có) và các trường liên quan cũ
+      updateData.school_info.major_id = null; // hoặc unset tùy theo logic
+      if (updateData.school_info.department)
+        delete updateData.school_info.department;
+      if (updateData.school_info.department_id)
+        delete updateData.school_info.department_id;
+      if (updateData.school_info.major) delete updateData.school_info.major;
+    }
+
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updateData },
-      { new: true }
-    ).select("-password");
+      { new: true, runValidators: true }
+    )
+      .select("-password")
+      .populate({
+        path: "school_info.major_id",
+        select: "name code department_id",
+        populate: {
+          path: "department_id",
+          select: "name code",
+        },
+      });
 
     res.status(200).json({
       success: true,
@@ -431,23 +492,55 @@ exports.getAdvisors = async (req, res) => {
  */
 exports.getTeachers = async (req, res) => {
   try {
-    const teachers = await User.find({
-      role: "teacher",
-      status: "approved",
-    })
-      .select("_id full_name email department")
-      .sort({ full_name: 1 });
+    const { page = 1, limit = 10, search = "", department_id } = req.query;
+    const query = { role: "teacher" };
+
+    if (search) {
+      query.$or = [
+        { email: { $regex: search, $options: "i" } },
+        { full_name: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Lưu ý: Giáo viên hiện tại không có liên kết trực tiếp với Major/Department trong UserSchema
+    // Nếu cần lọc giáo viên theo khoa, cần một cơ chế khác, ví dụ:
+    // - Giáo viên có thể thuộc một department_id trực tiếp trong UserSchema (cần thêm trường này)
+    // - Hoặc dựa trên các lớp họ dạy thuộc khoa nào (phức tạp hơn)
+    // Hiện tại, bộ lọc department_id này sẽ không hoạt động như mong đợi cho teacher
+    // nếu không có trường department_id trong User schema cho teacher.
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const teachers = await User.find(query)
+      .select("-password -refresh_token")
+      .populate({
+        // Giữ lại populate cho major/departmentเผื่อ trường hợp user schema có thay đổi
+        path: "school_info.major_id",
+        select: "name code department_id",
+        populate: {
+          path: "department_id",
+          select: "name code",
+        },
+      })
+      .sort({ full_name: 1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const totalTeachers = await User.countDocuments(query);
 
     res.status(200).json({
       success: true,
       count: teachers.length,
+      total: totalTeachers,
+      totalPages: Math.ceil(totalTeachers / parseInt(limit)),
+      currentPage: parseInt(page),
       data: teachers,
     });
   } catch (error) {
-    console.error("Get teachers error:", error);
+    console.error("Error getting teachers:", error);
     res.status(500).json({
       success: false,
-      message: "Lỗi máy chủ",
+      message: "Lỗi máy chủ khi lấy danh sách giáo viên.",
+      error: error.message,
     });
   }
 };
@@ -621,6 +714,128 @@ exports.getPublicAdvisors = async (req, res) => {
   }
 };
 
+/**
+ * @desc    Lấy thông tin người dùng hiện tại
+ * @route   GET /api/users/me
+ * @access  Private
+ */
+exports.getMe = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id)
+      .select("-password")
+      .populate("advisor_id", "full_name email")
+      .populate({
+        path: "main_class_id",
+        select: "name class_code year_start year_end major_id",
+        populate: {
+          path: "major_id",
+          select: "name code department_id",
+          populate: {
+            path: "department_id",
+            select: "name code",
+          },
+        },
+      })
+      .populate({
+        path: "school_info.major_id",
+        select: "name code department_id",
+        populate: {
+          path: "department_id",
+          select: "name code",
+        },
+      });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy người dùng",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: user,
+    });
+  } catch (error) {
+    console.error("Get user me error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Lỗi máy chủ",
+    });
+  }
+};
+
+/**
+ * @desc    Lấy danh sách người dùng để thêm vào lớp học
+ * @route   GET /api/users/to-add-to-class
+ * @access  Private
+ */
+exports.getUsersToAddToClass = async (req, res) => {
+  try {
+    const { role, search, excludeIds } = req.query;
+    const query = {};
+
+    if (role) {
+      query.role = role;
+    } else {
+      // Mặc định là tìm sinh viên nếu không có role
+      query.role = "student";
+    }
+
+    if (search) {
+      query.$or = [
+        { email: { $regex: search, $options: "i" } },
+        { full_name: { $regex: search, $options: "i" } },
+      ];
+      if (query.role === "student") {
+        query.$or.push({
+          "school_info.student_id": { $regex: search, $options: "i" },
+        });
+      }
+    }
+
+    if (excludeIds) {
+      const idsToExclude = excludeIds
+        .split(",")
+        .filter((id) => mongoose.Types.ObjectId.isValid(id));
+      if (idsToExclude.length > 0) {
+        query._id = { $nin: idsToExclude };
+      }
+    }
+
+    // Thêm populate cho school_info.major_id nếu là sinh viên
+    let usersQuery = User.find(query).select(
+      "full_name email role school_info.student_id avatar_url"
+    );
+
+    if (query.role === "student") {
+      usersQuery = usersQuery.populate({
+        path: "school_info.major_id",
+        select: "name code",
+        populate: {
+          // Thêm populate department_id từ major_id
+          path: "department_id",
+          select: "name code",
+        },
+      });
+    }
+
+    const users = await usersQuery.limit(20).sort({ full_name: 1 }); // Giới hạn kết quả để không quá tải
+
+    res.status(200).json({
+      success: true,
+      data: users,
+    });
+  } catch (error) {
+    console.error("Error getting users to add to class:", error);
+    res.status(500).json({
+      success: false,
+      message: "Lỗi máy chủ khi lấy danh sách người dùng.",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getAllUsers: exports.getAllUsers,
   getUserById: exports.getUserById,
@@ -635,4 +850,6 @@ module.exports = {
   getUserStats: exports.getUserStats,
   registerClass: exports.registerClass,
   getPublicAdvisors: exports.getPublicAdvisors,
+  getMe: exports.getMe,
+  getUsersToAddToClass: exports.getUsersToAddToClass,
 };

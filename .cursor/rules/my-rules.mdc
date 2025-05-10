@@ -1,7 +1,7 @@
 ---
 description: 
 globs: 
-alwaysApply: false
+alwaysApply: true
 ---
 Sử dụng reactJS thuần túy, đơn giản 
 Sử dụng thư viện MUI hiện đại, bắt mắt
@@ -16,3 +16,5 @@ Làm việc như một lập trình viên thực thụ, hướng tới tối ưu
 Thao tác với file phải cẩn thận, không được phá vỡ cấu trúc các folder
 Nếu đã có api thì dùng api đó, ko tạo api với chức năng giống nhau
 enum là tiếng anh, ví dụ (pending, approval)
+Nếu có một folder mà chứa các file chứa các chức năng cụ thể thì phải code trong file đó, tránh việc tạo các file/folder trùng lặp chức năng
+file schema chứa tất cả các model

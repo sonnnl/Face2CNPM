@@ -50,9 +50,11 @@ const CompleteRegistrationPage = () => {
   const { enqueueSnackbar } = useSnackbar();
   const [isLoading, setIsLoading] = useState(false);
   const [departments, setDepartments] = useState([]);
+  const [majors, setMajors] = useState([]);
   const [mainClasses, setMainClasses] = useState([]);
   const [filteredClasses, setFilteredClasses] = useState([]);
   const [loadingDepartments, setLoadingDepartments] = useState(false);
+  const [loadingMajors, setLoadingMajors] = useState(false);
   const [loadingClasses, setLoadingClasses] = useState(false);
   const [showRoleSelection, setShowRoleSelection] = useState(true);
   const [faceRegistrationExpanded, setFaceRegistrationExpanded] =
@@ -60,6 +62,7 @@ const CompleteRegistrationPage = () => {
   const [faceData, setFaceData] = useState(null);
   const [isFaceRegistrationComplete, setIsFaceRegistrationComplete] =
     useState(false);
+  const [derivedCourseYear, setDerivedCourseYear] = useState("");
 
   // Lấy thông tin từ URL params
   const queryParams = new URLSearchParams(location.search);
@@ -73,19 +76,19 @@ const CompleteRegistrationPage = () => {
     role: "",
     fullName: name || "",
     phone: "",
-    department: "",
+    department_id: "",
     studentId: "",
     studentCode: "",
     teacherCode: "",
-    major: "",
+    major_id: "",
     class: "",
-    year: new Date().getFullYear(),
   });
 
   const [formErrors, setFormErrors] = useState({
     role: "",
     fullName: "",
-    department: "",
+    department_id: "",
+    major_id: "",
     class: "",
   });
 
@@ -110,21 +113,40 @@ const CompleteRegistrationPage = () => {
   // Tải dữ liệu khoa và lớp khi trang được hiển thị
   useEffect(() => {
     fetchDepartments();
-    fetchMainClasses();
   }, []);
 
-  // Lọc danh sách lớp theo khoa được chọn
+  // Lọc danh sách lớp theo ngành được chọn
   useEffect(() => {
-    if (formData.department && mainClasses.length > 0) {
+    if (formData.major_id && mainClasses.length > 0) {
       const filtered = mainClasses.filter(
-        (cls) =>
-          cls.department_id && cls.department_id._id === formData.department
+        (cls) => cls.major_id && cls.major_id._id === formData.major_id
       );
       setFilteredClasses(filtered);
     } else {
       setFilteredClasses([]);
     }
-  }, [formData.department, mainClasses]);
+  }, [formData.major_id, mainClasses]);
+
+  // useEffect để cập nhật Khóa học dựa trên Lớp được chọn
+  useEffect(() => {
+    if (
+      formData.role === "student" &&
+      formData.class &&
+      mainClasses.length > 0
+    ) {
+      const selectedClass = mainClasses.find(
+        (cls) => cls._id === formData.class
+      );
+      if (selectedClass && selectedClass.year_start) {
+        // Giả sử API của bạn trả về trường 'year_start' cho năm bắt đầu của lớp
+        setDerivedCourseYear(selectedClass.year_start.toString());
+      } else {
+        setDerivedCourseYear(""); // Hoặc một giá trị mặc định/thông báo
+      }
+    } else {
+      setDerivedCourseYear(""); // Reset khi không phải student hoặc chưa chọn lớp
+    }
+  }, [formData.class, formData.role, mainClasses]);
 
   const fetchDepartments = async () => {
     setLoadingDepartments(true);
@@ -147,11 +169,43 @@ const CompleteRegistrationPage = () => {
     }
   };
 
-  const fetchMainClasses = async () => {
+  const fetchMajors = async (departmentId) => {
+    if (!departmentId) {
+      setMajors([]);
+      return;
+    }
+    setLoadingMajors(true);
+    try {
+      // Giả sử có API public để lấy ngành theo khoa
+      const response = await axios.get(
+        `${API_URL}/majors/public?department_id=${departmentId}`
+      );
+      if (response.data.success) {
+        setMajors(response.data.data || []);
+      } else {
+        setMajors([]);
+        enqueueSnackbar(response.data.message || "Không thể tải ngành học", {
+          variant: "error",
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching majors:", error);
+      setMajors([]);
+      enqueueSnackbar("Lỗi tải danh sách ngành học", { variant: "error" });
+    } finally {
+      setLoadingMajors(false);
+    }
+  };
+
+  const fetchMainClasses = async (majorId) => {
+    if (!majorId) {
+      setMainClasses([]);
+      return;
+    }
     setLoadingClasses(true);
     try {
       const response = await axios.get(
-        `${API_URL}/classes/main/public?all=true`
+        `${API_URL}/classes/main/public?all=true&major_id=${majorId}`
       );
       if (response.data.success) {
         setMainClasses(response.data.data);
@@ -172,7 +226,29 @@ const CompleteRegistrationPage = () => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData({ ...formData, [name]: value });
+    setFormData((prev) => {
+      const newFormData = { ...prev, [name]: value };
+
+      // Xử lý logic khi thay đổi khoa hoặc ngành
+      if (name === "department_id") {
+        newFormData.major_id = ""; // Reset ngành khi chọn khoa mới
+        newFormData.class = ""; // Reset lớp
+        setMajors([]);
+        setFilteredClasses([]);
+        setMainClasses([]);
+        if (value) {
+          fetchMajors(value);
+        }
+      } else if (name === "major_id") {
+        newFormData.class = ""; // Reset lớp khi chọn ngành mới
+        setFilteredClasses([]);
+        setMainClasses([]);
+        if (value) {
+          fetchMainClasses(value);
+        }
+      }
+      return newFormData;
+    });
 
     // Xóa lỗi khi người dùng nhập
     if (formErrors[name]) {
@@ -204,8 +280,14 @@ const CompleteRegistrationPage = () => {
     }
 
     // Kiểm tra khoa
-    if (formData.role === "student" && !formData.department) {
-      errors.department = "Vui lòng chọn khoa";
+    if (formData.role === "student" && !formData.department_id) {
+      errors.department_id = "Vui lòng chọn khoa";
+      valid = false;
+    }
+
+    // Kiểm tra ngành
+    if (formData.role === "student" && !formData.major_id) {
+      errors.major_id = "Vui lòng chọn ngành";
       valid = false;
     }
 
@@ -251,7 +333,12 @@ const CompleteRegistrationPage = () => {
 
       // Tìm thông tin khoa được chọn
       const selectedDepartment = departments.find(
-        (dept) => dept._id === formData.department
+        (dept) => dept._id === formData.department_id
+      );
+
+      // Tìm thông tin ngành được chọn
+      const selectedMajor = majors.find(
+        (major) => major._id === formData.major_id
       );
 
       // Tìm thông tin lớp được chọn
@@ -263,12 +350,16 @@ const CompleteRegistrationPage = () => {
       registrationData.school_info = {
         department: selectedDepartment
           ? selectedDepartment.name
-          : formData.department,
-        department_id: formData.department,
-        major: formData.role === "student" ? formData.major : undefined,
+          : formData.department_id,
+        department_id: formData.department_id,
+        major: selectedMajor ? selectedMajor.name : formData.major_id,
+        major_id: formData.major_id,
         class: selectedClass ? selectedClass.name : formData.class,
         class_id: formData.role === "student" ? formData.class : undefined,
-        year: formData.role === "student" ? formData.year : undefined,
+        year:
+          formData.role === "student" && selectedClass
+            ? selectedClass.year_start
+            : undefined,
         student_id:
           formData.role === "student" ? formData.studentId : undefined,
         teacher_code:
@@ -472,13 +563,13 @@ const CompleteRegistrationPage = () => {
           </Grid>
 
           <Grid item xs={12} md={6}>
-            <FormControl fullWidth required error={!!formErrors.department}>
+            <FormControl fullWidth required error={!!formErrors.department_id}>
               <InputLabel id="department-label">Khoa</InputLabel>
               <Select
                 labelId="department-label"
-                id="department"
-                name="department"
-                value={formData.department}
+                id="department_id"
+                name="department_id"
+                value={formData.department_id}
                 label="Khoa"
                 onChange={handleChange}
                 disabled={loadingDepartments}
@@ -489,8 +580,8 @@ const CompleteRegistrationPage = () => {
                   </MenuItem>
                 ))}
               </Select>
-              {formErrors.department && (
-                <FormHelperText>{formErrors.department}</FormHelperText>
+              {formErrors.department_id && (
+                <FormHelperText>{formErrors.department_id}</FormHelperText>
               )}
               {loadingDepartments && (
                 <Box sx={{ display: "flex", alignItems: "center", mt: 1 }}>
@@ -506,25 +597,48 @@ const CompleteRegistrationPage = () => {
           {formData.role === "student" && (
             <>
               <Grid item xs={12} md={6}>
-                <TextField
+                <FormControl
                   fullWidth
-                  id="studentId"
-                  label="Mã số sinh viên (MSSV)"
-                  name="studentId"
-                  value={formData.studentId}
-                  onChange={handleChange}
-                />
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  id="major"
-                  label="Ngành học"
-                  name="major"
-                  value={formData.major}
-                  onChange={handleChange}
-                />
+                  required
+                  error={!!formErrors.major_id}
+                  disabled={!formData.department_id || loadingMajors}
+                >
+                  <InputLabel id="major-label">Ngành học</InputLabel>
+                  <Select
+                    labelId="major-label"
+                    id="major_id"
+                    name="major_id"
+                    value={formData.major_id}
+                    label="Ngành học"
+                    onChange={handleChange}
+                  >
+                    <MenuItem value="">
+                      <em>
+                        {loadingMajors
+                          ? "Đang tải ngành..."
+                          : formData.department_id
+                          ? "Chọn Ngành học"
+                          : "Vui lòng chọn Khoa trước"}
+                      </em>
+                    </MenuItem>
+                    {majors.map((major) => (
+                      <MenuItem key={major._id} value={major._id}>
+                        {major.name} ({major.code})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                  {formErrors.major_id && (
+                    <FormHelperText>{formErrors.major_id}</FormHelperText>
+                  )}
+                  {loadingMajors && (
+                    <Box sx={{ display: "flex", alignItems: "center", mt: 1 }}>
+                      <CircularProgress size={20} sx={{ mr: 1 }} />
+                      <Typography variant="caption">
+                        Đang tải danh sách ngành...
+                      </Typography>
+                    </Box>
+                  )}
+                </FormControl>
               </Grid>
 
               <Grid item xs={12} md={6}>
@@ -537,7 +651,11 @@ const CompleteRegistrationPage = () => {
                     value={formData.class}
                     label="Lớp"
                     onChange={handleChange}
-                    disabled={!formData.department || loadingClasses}
+                    disabled={
+                      !formData.major_id ||
+                      loadingClasses ||
+                      filteredClasses.length === 0
+                    }
                   >
                     {filteredClasses.length > 0 ? (
                       filteredClasses.map((cls) => (
@@ -547,9 +665,11 @@ const CompleteRegistrationPage = () => {
                       ))
                     ) : (
                       <MenuItem disabled value="">
-                        {formData.department
-                          ? "Không có lớp nào trong khoa này"
-                          : "Vui lòng chọn khoa trước"}
+                        {loadingClasses
+                          ? "Đang tải lớp..."
+                          : !formData.major_id
+                          ? "Vui lòng chọn Ngành trước"
+                          : "Không có lớp nào trong ngành này"}
                       </MenuItem>
                     )}
                   </Select>
@@ -570,12 +690,25 @@ const CompleteRegistrationPage = () => {
               <Grid item xs={12} md={6}>
                 <TextField
                   fullWidth
-                  id="year"
-                  label="Khóa học"
-                  name="year"
-                  type="number"
-                  value={formData.year}
+                  id="studentId"
+                  label="Mã số sinh viên (MSSV)"
+                  name="studentId"
+                  value={formData.studentId}
                   onChange={handleChange}
+                />
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  id="derivedCourseYear"
+                  label="Khóa học (từ lớp)"
+                  name="derivedCourseYear"
+                  value={derivedCourseYear}
+                  InputProps={{
+                    readOnly: true,
+                  }}
+                  variant="filled"
                 />
               </Grid>
             </>

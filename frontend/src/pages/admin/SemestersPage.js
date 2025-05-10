@@ -57,7 +57,10 @@ const SemestersPage = () => {
     start_date: "",
     end_date: "",
     is_current: false,
-    status: "chưa bắt đầu",
+    semester_number: "",
+    academic_year: "",
+    registration_start_date: "",
+    registration_end_date: "",
   });
   const [selectedSemester, setSelectedSemester] = useState(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -115,7 +118,14 @@ const SemestersPage = () => {
           : "",
         end_date: semester.end_date ? semester.end_date.substring(0, 10) : "",
         is_current: semester.is_current || false,
-        status: semester.status || "chưa bắt đầu",
+        semester_number: semester.semester_number || "",
+        academic_year: semester.academic_year || "",
+        registration_start_date: semester.registration_start_date
+          ? semester.registration_start_date.substring(0, 10)
+          : "",
+        registration_end_date: semester.registration_end_date
+          ? semester.registration_end_date.substring(0, 10)
+          : "",
       });
       setSelectedSemester(semester);
     } else {
@@ -125,7 +135,10 @@ const SemestersPage = () => {
         start_date: "",
         end_date: "",
         is_current: false,
-        status: "chưa bắt đầu",
+        semester_number: "",
+        academic_year: "",
+        registration_start_date: "",
+        registration_end_date: "",
       });
     }
     setDialogOpen(true);
@@ -292,22 +305,20 @@ const SemestersPage = () => {
                       : ""}
                   </TableCell>
                   <TableCell>
-                    {semester.status ? (
+                    {semester.calculated_status ? (
                       <Chip
-                        label={semester.status}
+                        label={semester.calculated_status}
                         color={
-                          semester.status === "đang học"
+                          semester.calculated_status === "Đang diễn ra"
                             ? "primary"
-                            : semester.status === "đã hoàn thành"
-                            ? "success"
+                            : semester.calculated_status === "Đã kết thúc"
+                            ? "default"
                             : "warning"
                         }
                         size="small"
                       />
-                    ) : semester.is_current ? (
-                      "Đang hoạt động"
                     ) : (
-                      "Không hoạt động"
+                      <Chip label="Không xác định" size="small" />
                     )}
                   </TableCell>
                   <TableCell align="right">
@@ -399,21 +410,6 @@ const SemestersPage = () => {
                 InputLabelProps={{ shrink: true }}
                 required
               />
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Trạng thái</InputLabel>
-                <Select
-                  name="status"
-                  value={formData.status}
-                  onChange={handleFormChange}
-                  label="Trạng thái"
-                >
-                  <MenuItem value="chưa bắt đầu">Chưa bắt đầu</MenuItem>
-                  <MenuItem value="đang học">Đang học</MenuItem>
-                  <MenuItem value="đã hoàn thành">Đã hoàn thành</MenuItem>
-                </Select>
-              </FormControl>
             </Grid>
           </Grid>
         </DialogContent>

@@ -18,23 +18,7 @@ const UserSchema = new Schema({
   school_info: {
     student_id: String, // Mã số sinh viên (MSSV)
     teacher_code: String,
-    department: String,
-    department_id: { type: Schema.Types.ObjectId, ref: "Department" },
-    major: {
-      type: String,
-      enum: [
-        "Công nghệ thông tin",
-        "Khoa học máy tính",
-        "Kỹ thuật phần mềm",
-        "Hệ thống thông tin",
-        "An toàn thông tin",
-        "Quản trị kinh doanh",
-        "Marketing",
-        "Kế toán",
-        "Tài chính - Ngân hàng",
-        "Ngôn ngữ Anh",
-      ],
-    },
+    major_id: { type: Schema.Types.ObjectId, ref: "Major" },
     class: String,
     class_id: { type: Schema.Types.ObjectId, ref: "MainClass" },
     year: Number,
@@ -61,6 +45,20 @@ const DepartmentSchema = new Schema({
   code: { type: String, required: true, unique: true },
   description: String,
   head_id: { type: Schema.Types.ObjectId, ref: "User" }, // Trưởng khoa
+});
+
+// -------------------- MAJORS --------------------
+const MajorSchema = new Schema({
+  name: { type: String, required: true },
+  code: { type: String, required: true, unique: true },
+  department_id: {
+    type: Schema.Types.ObjectId,
+    ref: "Department",
+    required: true,
+  },
+  description: String,
+  created_at: { type: Date, default: Date.now },
+  updated_at: { type: Date, default: Date.now },
 });
 
 // -------------------- FACILITIES MANAGEMENT --------------------
@@ -154,7 +152,7 @@ const RoomScheduleSchema = new Schema({
 const MainClassSchema = new Schema({
   name: { type: String, required: true },
   class_code: { type: String, required: true, unique: true },
-  department_id: { type: Schema.Types.ObjectId, ref: "Department" },
+  major_id: { type: Schema.Types.ObjectId, ref: "Major", required: true },
   students: [{ type: Schema.Types.ObjectId, ref: "User" }],
   pending_students: [{ type: Schema.Types.ObjectId, ref: "User" }],
   advisor_id: { type: Schema.Types.ObjectId, ref: "User" },
@@ -326,7 +324,7 @@ const SubjectSchema = new Schema({
   name: { type: String, required: true },
   code: { type: String, required: true, unique: true },
   credits: { type: Number, required: true, default: 3 },
-  department: { type: Schema.Types.ObjectId, ref: "Department" },
+  department_id: { type: Schema.Types.ObjectId, ref: "Department" },
   description: String,
   status: {
     type: String,
@@ -340,6 +338,7 @@ const SubjectSchema = new Schema({
 // Tạo và export models
 const User = mongoose.model("User", UserSchema);
 const Department = mongoose.model("Department", DepartmentSchema);
+const Major = mongoose.model("Major", MajorSchema);
 const Campus = mongoose.model("Campus", CampusSchema);
 const Building = mongoose.model("Building", BuildingSchema);
 const Room = mongoose.model("Room", RoomSchema);
@@ -360,6 +359,7 @@ const Subject = mongoose.model("Subject", SubjectSchema);
 module.exports = {
   User,
   Department,
+  Major,
   Campus,
   Building,
   Room,

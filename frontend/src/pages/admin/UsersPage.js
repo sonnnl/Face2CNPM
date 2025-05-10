@@ -254,11 +254,11 @@ const UsersPage = () => {
                 gutterBottom
                 sx={{ fontSize: "1rem" }}
               >
-                Giáo viên
+                Giáo viên (Đã duyệt)
               </Typography>
               <Box display="flex" alignItems="center">
                 <SupervisorAccount
-                  sx={{ mr: 1, color: "primary.main", fontSize: 40 }}
+                  sx={{ mr: 1, color: "text.secondary", fontSize: 40 }}
                 />
                 <Typography variant="h4">
                   {userStats.approvedTeachers || 0}
@@ -276,10 +276,10 @@ const UsersPage = () => {
                 gutterBottom
                 sx={{ fontSize: "1rem" }}
               >
-                Sinh viên
+                Sinh viên (Đã duyệt)
               </Typography>
               <Box display="flex" alignItems="center">
-                <School sx={{ mr: 1, color: "success.main", fontSize: 40 }} />
+                <School sx={{ mr: 1, color: "text.secondary", fontSize: 40 }} />
                 <Typography variant="h4">
                   {userStats.approvedStudents || 0}
                 </Typography>
@@ -299,14 +299,20 @@ const UsersPage = () => {
                 Chờ phê duyệt
               </Typography>
               <Box display="flex" alignItems="center">
-                <VerifiedUser
-                  sx={{ mr: 1, color: "warning.main", fontSize: 40 }}
-                />
+                <Person sx={{ mr: 1, color: "text.secondary", fontSize: 40 }} />
                 <Typography variant="h4">
                   {(userStats.pendingTeachers || 0) +
                     (userStats.pendingStudents || 0)}
                 </Typography>
               </Box>
+              <Typography
+                variant="caption"
+                display="block"
+                color="textSecondary"
+              >
+                GV: {userStats.pendingTeachers || 0} | SV:{" "}
+                {userStats.pendingStudents || 0}
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -398,7 +404,7 @@ const UsersPage = () => {
               <TableCell>Thông tin</TableCell>
               <TableCell>Email</TableCell>
               <TableCell>Vai trò</TableCell>
-              <TableCell align="center">Trạng thái</TableCell>
+              <TableCell>Trạng thái</TableCell>
               <TableCell align="right">Thao tác</TableCell>
             </TableRow>
           </TableHead>

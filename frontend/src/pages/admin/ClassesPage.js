@@ -94,6 +94,7 @@ const ClassesPage = () => {
   const [classes, setClasses] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMajors, setIsLoadingMajors] = useState(false); // New state for loading majors
 
   // Pagination state
   const [page, setPage] = useState(0);
@@ -109,6 +110,7 @@ const ClassesPage = () => {
   const [students, setStudents] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [semesters, setSemesters] = useState([]);
+  const [filteredMajors, setFilteredMajors] = useState([]); // New state for majors filtered by department
 
   // Dialog states
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -119,10 +121,13 @@ const ClassesPage = () => {
   // Main Class Form Data
   const [mainClassForm, setMainClassForm] = useState({
     name: "",
-    code: "",
-    department_id: "",
+    class_code: "", // Renamed from code
+    selected_department_id: "", // For department dropdown to filter majors
+    major_id: "", // New: to store selected major's ID
     advisor_id: "",
     students: [],
+    year_start: new Date().getFullYear(), // Default to current year
+    year_end: new Date().getFullYear() + 4, // Default to 4 years later
   });
 
   // Teaching Class Form Data
@@ -143,6 +148,7 @@ const ClassesPage = () => {
     teacher: "",
     course: "",
     semester: "",
+    year_start: "", // Added year_start filter
   });
 
   // Thêm states cho thống kê
@@ -158,6 +164,8 @@ const ClassesPage = () => {
     main: {
       name: false,
       code: false,
+      selected_department_id: false, // Added for validation if needed
+      major_id: false, // Added for validation
     },
     teaching: {
       class_name: false,
@@ -200,6 +208,13 @@ const ClassesPage = () => {
       confirmDeleteDialogOpen: false,
     });
 
+  // Thêm state để kiểm soát việc vô hiệu hóa chọn môn học
+  const [isSubjectSelectionDisabled, setIsSubjectSelectionDisabled] =
+    useState(false);
+  // Thêm state để kiểm soát việc vô hiệu hóa chọn học kỳ
+  const [isSemesterSelectionDisabled, setIsSemesterSelectionDisabled] =
+    useState(false);
+
   // Load data on mount and when pagination/search changes
   useEffect(() => {
     loadClasses();
@@ -207,7 +222,7 @@ const ClassesPage = () => {
 
   useEffect(() => {
     loadLookupData();
-    loadMainClasses();
+    loadMainClasses(); // ensure this is called or integrated with loadClasses
   }, []);
 
   useEffect(() => {
@@ -251,7 +266,11 @@ const ClassesPage = () => {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
-      setSubjects(subjectsResponse.data.data || []);
+      // Lọc các môn học có status là "đang dạy"
+      const activeSubjects = subjectsResponse.data.data.filter(
+        (subject) => subject.status === "đang dạy"
+      );
+      setSubjects(activeSubjects || []);
 
       // Load semesters
       const semestersResponse = await axios.get(
@@ -273,46 +292,62 @@ const ClassesPage = () => {
   const loadClasses = async () => {
     try {
       setIsLoading(true);
-      const endpoint = tabValue === 0 ? "classes/main" : "classes/teaching";
-
-      // Xây dựng query params với bộ lọc
+      let url;
       let queryParams = `page=${
         page + 1
       }&limit=${rowsPerPage}&search=${searchTerm}`;
 
-      if (tabValue === 0 && filterOptions.department) {
-        queryParams += `&department_id=${filterOptions.department}`;
-      }
-
-      if (tabValue === 0 && filterOptions.teacher) {
-        queryParams += `&advisor_id=${filterOptions.teacher}`;
-      }
-
-      if (tabValue === 1 && filterOptions.course) {
-        queryParams += `&subject_id=${filterOptions.course}`;
-      }
-
-      if (tabValue === 1 && filterOptions.teacher) {
-        queryParams += `&teacher_id=${filterOptions.teacher}`;
-      }
-
-      if (tabValue === 1 && filterOptions.semester) {
-        queryParams += `&semester=${filterOptions.semester}`;
-      }
-
-      const response = await axios.get(
-        `${API_URL}/${endpoint}?${queryParams}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
+      if (tabValue === 0) {
+        // Lớp chính
+        url = `${API_URL}/classes/main`;
+        if (filterOptions.department) {
+          queryParams += `&department_id=${filterOptions.department}`; // Send department_id directly for backend to handle major lookup
         }
-      );
+        if (filterOptions.year_start) {
+          queryParams += `&year_start=${filterOptions.year_start}`;
+        }
+        if (filterOptions.teacher) {
+          queryParams += `&advisor_id=${filterOptions.teacher}`;
+        }
+      } else {
+        // Lớp giảng dạy
+        url = `${API_URL}/classes/teaching`;
+        if (filterOptions.course) {
+          queryParams += `&subject_id=${filterOptions.course}`;
+        }
+        if (filterOptions.teacher) {
+          queryParams += `&teacher_id=${filterOptions.teacher}`;
+        }
+        if (filterOptions.semester) {
+          queryParams += `&semester=${filterOptions.semester}`;
+        }
+      }
 
-      setClasses(response.data.data || []);
-      setTotalCount(response.data.totalCount || 0);
-      setIsLoading(false);
+      const response = await axios.get(`${url}?${queryParams}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (tabValue === 0) {
+        setMainClasses(response.data.data || []);
+        setTotalCount(response.data.total || 0); // Assuming backend returns total for main classes
+      } else {
+        setClasses(response.data.data || []);
+        setTotalCount(response.data.total || 0); // Assuming backend returns total for teaching classes
+      }
     } catch (error) {
-      console.error("Lỗi khi tải danh sách lớp:", error);
-      enqueueSnackbar("Lỗi khi tải danh sách lớp", { variant: "error" });
+      enqueueSnackbar(
+        `Lỗi khi tải danh sách lớp: ${
+          error?.response?.data?.message || error.message
+        }`,
+        { variant: "error" }
+      );
+      if (tabValue === 0) {
+        setMainClasses([]);
+      } else {
+        setClasses([]);
+      }
+      setTotalCount(0);
+    } finally {
       setIsLoading(false);
     }
   };
@@ -355,57 +390,80 @@ const ClassesPage = () => {
 
   // Thêm hàm xóa bộ lọc
   const clearFilters = () => {
-    setPage(0); // Reset page first
     setFilterOptions({
-      // This will trigger the useEffect
       department: "",
       teacher: "",
       course: "",
       semester: "",
+      year_start: "",
     });
-    setSearchTerm(""); // This is for the separate search input, keep it.
+    setSearchTerm(""); // Also clear search term
+    // loadClasses will be triggered by useEffect on filterOptions
+  };
+
+  const loadMajorsByDepartment = async (departmentId) => {
+    if (!departmentId) {
+      setFilteredMajors([]);
+      return;
+    }
+    setIsLoadingMajors(true);
+    try {
+      const response = await axios.get(
+        `${API_URL}/majors?department_id=${departmentId}&all=true`, // Fetch all majors for the department
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      setFilteredMajors(response.data.data || []);
+    } catch (error) {
+      enqueueSnackbar(
+        `Lỗi khi tải danh sách ngành: ${
+          error?.response?.data?.message || error.message
+        }`,
+        { variant: "error" }
+      );
+      setFilteredMajors([]);
+    } finally {
+      setIsLoadingMajors(false);
+    }
   };
 
   // Dialog handlers
-  const openDialog = (mode, classItem = null) => {
+  const openDialog = async (mode, classItem = null) => {
     setDialogMode(mode);
+    setFormErrors({
+      main: {
+        name: false,
+        code: false,
+        selected_department_id: false,
+        major_id: false,
+      },
+      teaching: {
+        class_name: false,
+        class_code: false,
+        subject_id: false,
+        semester_id: false,
+      },
+    });
+    // Reset filteredMajors khi mở dialog, sẽ được load lại nếu cần
+    setFilteredMajors([]);
 
-    if (tabValue === 0) {
-      // Main Class
-      if (mode === "edit" && classItem) {
-        setMainClassForm({
-          name: classItem.name,
-          code: classItem.class_code,
-          department_id: classItem.department_id?._id || "",
-          advisor_id: classItem.advisor_id?._id || "",
-          students: classItem.students?.map((s) => s._id) || [],
-        });
-      } else {
+    if (mode === "create") {
+      setSelectedClass(null);
+      if (tabValue === 0) {
+        // Main Class
         setMainClassForm({
           name: "",
-          code: "",
-          department_id: "",
+          class_code: "",
+          selected_department_id: "",
+          major_id: "",
           advisor_id: "",
           students: [],
-        });
-      }
-    } else {
-      // Teaching Class - cần tải danh sách lớp chính trước
-      loadMainClasses();
-
-      if (mode === "edit" && classItem) {
-        setTeachingClassForm({
-          class_name: classItem.class_name || classItem.name,
-          class_code: classItem.class_code,
-          subject_id:
-            classItem.subject_id?._id || classItem.course_id?._id || "",
-          semester_id: classItem.semester_id?._id || "",
-          teacher_id: classItem.teacher_id?._id || "",
-          main_class_id: classItem.main_class_id?._id || "",
-          selected_students: classItem.students?.map((s) => s._id) || [],
-          description: classItem.description || "",
+          year_start: new Date().getFullYear(),
+          year_end: new Date().getFullYear() + 4,
         });
       } else {
+        // Teaching Class
         setTeachingClassForm({
           class_name: "",
           class_code: "",
@@ -417,9 +475,75 @@ const ClassesPage = () => {
           description: "",
         });
       }
-    }
+    } else if (mode === "edit" && classItem) {
+      setSelectedClass(classItem);
+      if (tabValue === 0) {
+        // Main Class
+        const departmentIdForMajorFilter =
+          classItem.major_id?.department_id?._id;
 
-    setSelectedClass(classItem);
+        // Initialize form state, temporarily set major_id to empty
+        // It will be set correctly after majors are loaded
+        setMainClassForm({
+          name: classItem.name || "",
+          class_code: classItem.class_code || "",
+          selected_department_id: departmentIdForMajorFilter || "",
+          major_id: "", // Temporarily reset, will be set after loadMajorsByDepartment
+          advisor_id: classItem.advisor_id?._id || "",
+          students: classItem.students?.map((s) => s._id) || [],
+          year_start: classItem.year_start || new Date().getFullYear(),
+          year_end: classItem.year_end || new Date().getFullYear() + 4,
+        });
+
+        if (departmentIdForMajorFilter) {
+          await loadMajorsByDepartment(departmentIdForMajorFilter);
+          // Now that filteredMajors should be populated, set the actual major_id
+          setMainClassForm((prev) => ({
+            ...prev,
+            major_id: classItem.major_id?._id || "",
+          }));
+        } else {
+          // If there's no department, ensure filteredMajors is empty
+          setFilteredMajors([]);
+        }
+      } else {
+        // Teaching Class
+        setTeachingClassForm({
+          class_name: classItem.class_name || classItem.name,
+          class_code: classItem.class_code,
+          subject_id:
+            classItem.subject_id?._id || classItem.course_id?._id || "",
+          semester_id: classItem.semester_id?._id || "",
+          teacher_id: classItem.teacher_id?._id || "",
+          main_class_id: classItem.main_class_id?._id || "",
+          selected_students: classItem.students?.map((s) => s._id) || [],
+          description: classItem.description || "",
+        });
+
+        if (classItem.semester_id?._id) {
+          const currentSemesterOfClass = semesters.find(
+            (s) => s._id === classItem.semester_id._id
+          );
+          if (currentSemesterOfClass) {
+            if (currentSemesterOfClass.calculated_status === "Đã kết thúc") {
+              setIsSubjectSelectionDisabled(true);
+              setIsSemesterSelectionDisabled(true);
+              // enqueueSnackbar(
+              //   `Lớp học này thuộc về học kỳ '${currentSemesterOfClass.name}' đã kết thúc. Không thể thay đổi học kỳ hoặc môn học.`,
+              //   { variant: "warning", autoHideDuration: 7000 }
+              // );
+            } else {
+              setIsSubjectSelectionDisabled(false);
+              setIsSemesterSelectionDisabled(false);
+            }
+          } else {
+            setIsSubjectSelectionDisabled(false);
+            setIsSemesterSelectionDisabled(false);
+          }
+        }
+      }
+    }
+    setSelectedClass(classItem); // selectedClass vẫn được dùng cho delete dialog
     setDialogOpen(true);
   };
 
@@ -432,7 +556,8 @@ const ClassesPage = () => {
     });
 
     // Xóa lỗi khi người dùng nhập liệu
-    if (name in formErrors.main && value.trim() !== "") {
+    if (formErrors.main[name] && String(value).trim() !== "") {
+      // Improved check for any field in formErrors.main
       setFormErrors({
         ...formErrors,
         main: {
@@ -446,13 +571,50 @@ const ClassesPage = () => {
   // Cập nhật hàm handleTeachingClassFormChange để có validation
   const handleTeachingClassFormChange = (e) => {
     const { name, value } = e.target;
-    setTeachingClassForm({
-      ...teachingClassForm,
-      [name]: value,
-    });
 
-    // Xóa lỗi khi người dùng nhập liệu
-    if (name in formErrors.teaching && value.trim() !== "") {
+    if (name === "semester_id") {
+      const selectedSemester = semesters.find((s) => s._id === value);
+
+      if (selectedSemester) {
+        if (selectedSemester.calculated_status === "Đã kết thúc") {
+          setIsSubjectSelectionDisabled(true);
+          setTeachingClassForm((prevForm) => ({
+            ...prevForm,
+            semester_id: value,
+            subject_id: "",
+          }));
+          // enqueueSnackbar(
+          //   `Học kỳ '${selectedSemester.name}' đã kết thúc. Môn học đã được bỏ chọn và không thể gán mới.`,
+          //   { variant: "warning", autoHideDuration: 7000 }
+          // );
+        } else {
+          setIsSubjectSelectionDisabled(false);
+          setTeachingClassForm((prevForm) => ({
+            ...prevForm,
+            semester_id: value,
+          }));
+        }
+        const formatDate = (dateString) => {
+          const date = new Date(dateString);
+          return date.toLocaleDateString("vi-VN");
+        };
+        // Giữ lại snackbar thông tin về thời gian học kỳ nếu bạn thấy cần thiết, hoặc xóa nếu không muốn thông báo nào cả.
+        // enqueueSnackbar(
+        //   `Thời gian học kỳ ${selectedSemester.name}: ${formatDate(selectedSemester.start_date)} - ${formatDate(selectedSemester.end_date)}.`,
+        //   { variant: "info", autoHideDuration: 8000 }
+        // );
+      } else {
+        setIsSubjectSelectionDisabled(false);
+        setTeachingClassForm((prevForm) => ({
+          ...prevForm,
+          semester_id: value,
+        }));
+      }
+    } else {
+      setTeachingClassForm((prevForm) => ({ ...prevForm, [name]: value }));
+    }
+
+    if (name in formErrors.teaching && String(value).trim() !== "") {
       setFormErrors({
         ...formErrors,
         teaching: {
@@ -461,45 +623,23 @@ const ClassesPage = () => {
         },
       });
     }
-
-    // Nếu đang thay đổi học kỳ, hiển thị thông tin về thời gian học kỳ
-    if (name === "semester_id" && value) {
-      // Tìm học kỳ được chọn
-      const selectedSemester = semesters.find((sem) => sem._id === value);
-
-      if (selectedSemester) {
-        // Định dạng ngày để hiển thị
-        const formatDate = (dateString) => {
-          const date = new Date(dateString);
-          return date.toLocaleDateString("vi-VN");
-        };
-
-        // Hiển thị thông báo về thời gian học kỳ
-        enqueueSnackbar(
-          `Lưu ý: Thời gian khóa học phải nằm trong khoảng thời gian của học kỳ ${
-            selectedSemester.name
-          }: từ ${formatDate(selectedSemester.start_date)} đến ${formatDate(
-            selectedSemester.end_date
-          )}`,
-          { variant: "info", autoHideDuration: 10000 }
-        );
-      }
-    }
   };
 
   // Thêm hàm validateMainClassForm
   const validateMainClassForm = () => {
     const errors = {
-      name: mainClassForm.name.trim() === "",
-      code: mainClassForm.code.trim() === "",
+      name: !mainClassForm.name,
+      class_code: !mainClassForm.class_code,
+      selected_department_id: !mainClassForm.selected_department_id,
+      major_id: !mainClassForm.major_id,
     };
-
-    setFormErrors({
-      ...formErrors,
-      main: errors,
-    });
-
-    return !Object.values(errors).some(Boolean);
+    setFormErrors((prev) => ({ ...prev, main: errors }));
+    return (
+      !errors.name &&
+      !errors.class_code &&
+      !errors.selected_department_id &&
+      !errors.major_id
+    );
   };
 
   // Thêm hàm validateTeachingClassForm
@@ -534,8 +674,17 @@ const ClassesPage = () => {
         }
 
         // Main class
+        const payload = {
+          name: mainClassForm.name,
+          class_code: mainClassForm.class_code,
+          major_id: mainClassForm.major_id, // Correctly send major_id
+          advisor_id: mainClassForm.advisor_id || null,
+          year_start: parseInt(mainClassForm.year_start, 10),
+          year_end: parseInt(mainClassForm.year_end, 10),
+        };
+
         if (dialogMode === "create") {
-          await axios.post(`${API_URL}/classes/main`, mainClassForm, {
+          await axios.post(`${API_URL}/classes/main`, payload, {
             headers: { Authorization: `Bearer ${token}` },
           });
           enqueueSnackbar("Tạo lớp chính mới thành công", {
@@ -544,7 +693,7 @@ const ClassesPage = () => {
         } else {
           await axios.put(
             `${API_URL}/classes/main/${selectedClass._id}`,
-            mainClassForm,
+            payload,
             {
               headers: { Authorization: `Bearer ${token}` },
             }
@@ -760,10 +909,20 @@ const ClassesPage = () => {
 
   // Xử lý xóa lớp
   const handleDeleteClass = async () => {
+    // Đảm bảo deleteDialog.item và deleteDialog.item._id tồn tại
+    if (!deleteDialog.item || !deleteDialog.item._id) {
+      enqueueSnackbar("Không thể xác định mục để xóa. Vui lòng thử lại.", {
+        variant: "error",
+      });
+      setDeleteDialog({ open: false, item: null }); // Đóng dialog và reset
+      return;
+    }
+
     try {
       const endpoint = tabValue === 0 ? "classes/main" : "classes/teaching";
 
-      await axios.delete(`${API_URL}/${endpoint}/${selectedClass._id}`, {
+      // Sử dụng deleteDialog.item._id thay vì selectedClass._id
+      await axios.delete(`${API_URL}/${endpoint}/${deleteDialog.item._id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -771,7 +930,7 @@ const ClassesPage = () => {
         `Xóa ${tabValue === 0 ? "lớp chính" : "lớp giảng dạy"} thành công`,
         { variant: "success" }
       );
-      setDeleteDialogOpen(false);
+      setDeleteDialog({ open: false, item: null }); // Reset cả item
       loadClasses();
       if (tabValue === 0) {
         loadMainClasses(); // Tải lại danh sách lớp chính nếu xóa lớp chính
@@ -787,6 +946,7 @@ const ClassesPage = () => {
           `Lỗi khi xóa ${tabValue === 0 ? "lớp chính" : "lớp giảng dạy"}`,
         { variant: "error" }
       );
+      setDeleteDialog({ open: false, item: null }); // Reset cả item khi có lỗi
     }
   };
 
@@ -1028,10 +1188,13 @@ const ClassesPage = () => {
           <TableRow>
             <TableCell sx={{ fontWeight: "bold" }}>Tên lớp</TableCell>
             <TableCell sx={{ fontWeight: "bold" }}>Mã lớp</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>Ngành</TableCell>
             <TableCell sx={{ fontWeight: "bold" }}>Khoa</TableCell>
             <TableCell sx={{ fontWeight: "bold" }}>
               Giáo viên chủ nhiệm
             </TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>Năm BĐ</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>Năm KT</TableCell>
             <TableCell align="center" sx={{ fontWeight: "bold" }}>
               Số lượng SV
             </TableCell>
@@ -1043,15 +1206,19 @@ const ClassesPage = () => {
         <TableBody>
           {isLoading ? (
             <TableRow>
-              <TableCell colSpan={6} align="center">
+              <TableCell colSpan={8} align="center">
+                {" "}
+                {/* Increased colSpan from 6 to 8 */}
                 <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}>
                   <CircularProgress size={30} />
                 </Box>
               </TableCell>
             </TableRow>
-          ) : classes.length === 0 ? (
+          ) : mainClasses.length === 0 ? ( // Sử dụng mainClasses ở đây
             <TableRow>
-              <TableCell colSpan={6} align="center">
+              <TableCell colSpan={8} align="center">
+                {" "}
+                {/* Increased colSpan from 6 to 8 */}
                 <Box sx={{ py: 3 }}>
                   <Typography color="textSecondary">
                     Không tìm thấy lớp học nào
@@ -1068,103 +1235,120 @@ const ClassesPage = () => {
               </TableCell>
             </TableRow>
           ) : (
-            classes.map((classItem) => (
-              <TableRow
-                key={classItem._id}
-                hover
-                sx={{ "&:hover": { bgcolor: "rgba(0, 0, 0, 0.04)" } }}
-              >
-                <TableCell>
-                  <Typography variant="body1">{classItem.name}</Typography>
-                </TableCell>
-                <TableCell>
-                  <Chip
-                    label={classItem.class_code}
-                    size="small"
-                    color="primary"
-                    variant="outlined"
-                  />
-                </TableCell>
-                <TableCell>
-                  {classItem.department_id?.name ? (
+            mainClasses.map(
+              (
+                classItem // Sử dụng mainClasses ở đây
+              ) => (
+                <TableRow
+                  key={classItem._id}
+                  hover
+                  sx={{ "&:hover": { bgcolor: "rgba(0, 0, 0, 0.04)" } }}
+                >
+                  <TableCell>
+                    <Typography variant="body1">{classItem.name}</Typography>
+                  </TableCell>
+                  <TableCell>
                     <Chip
-                      label={classItem.department_id.name}
+                      label={classItem.class_code}
                       size="small"
-                      sx={{ bgcolor: "#e3f2fd" }}
-                    />
-                  ) : (
-                    <Chip
-                      label="Chưa phân khoa"
-                      size="small"
+                      color="primary"
                       variant="outlined"
-                      color="default"
                     />
-                  )}
-                </TableCell>
-                <TableCell>
-                  {classItem.advisor_id?.full_name ? (
-                    <Box>
-                      <Typography variant="body2">
-                        {classItem.advisor_id.full_name}
-                      </Typography>
-                      <Typography variant="caption" color="textSecondary">
-                        {classItem.advisor_id.email || ""}
-                      </Typography>
+                  </TableCell>
+                  <TableCell>
+                    {classItem.major_id?.name ? (
+                      <Chip
+                        label={classItem.major_id.name}
+                        size="small"
+                        variant="outlined"
+                      />
+                    ) : (
+                      <Chip label="N/A" size="small" />
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {classItem.major_id?.department_id?.name ? (
+                      <Chip
+                        label={classItem.major_id.department_id.name}
+                        size="small"
+                        sx={{ bgcolor: "#e3f2fd" }}
+                      />
+                    ) : (
+                      <Chip
+                        label="N/A" // Changed from "Chưa phân khoa"
+                        size="small"
+                        variant="outlined"
+                        color="default"
+                      />
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {classItem.advisor_id?.full_name ? (
+                      <Box>
+                        <Typography variant="body2">
+                          {classItem.advisor_id.full_name}
+                        </Typography>
+                        <Typography variant="caption" color="textSecondary">
+                          {classItem.advisor_id.email || ""}
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <Chip
+                        label="Chưa phân công"
+                        size="small"
+                        color="warning"
+                        variant="outlined"
+                      />
+                    )}
+                  </TableCell>
+                  <TableCell>{classItem.year_start || "N/A"}</TableCell>
+                  <TableCell>{classItem.year_end || "N/A"}</TableCell>
+                  <TableCell align="center">
+                    <Chip
+                      label={classItem.students?.length || 0}
+                      color={
+                        classItem.students?.length > 0 ? "success" : "default"
+                      }
+                      size="small"
+                    />
+                  </TableCell>
+                  <TableCell align="right">
+                    <Box display="flex" justifyContent="flex-end">
+                      <Tooltip title="Sửa lớp">
+                        <IconButton
+                          color="primary"
+                          onClick={() => openDialog("edit", classItem)}
+                          size="small"
+                          sx={{ mx: 0.5 }}
+                        >
+                          <Edit fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Xóa lớp">
+                        <IconButton
+                          color="error"
+                          onClick={() => openDeleteDialog(classItem)}
+                          size="small"
+                          sx={{ mx: 0.5 }}
+                        >
+                          <Delete fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Quản lý sinh viên Lớp Chính">
+                        <IconButton
+                          color="info"
+                          onClick={() => openStudentApproval(classItem)}
+                          size="small"
+                          sx={{ mx: 0.5 }}
+                        >
+                          <People fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     </Box>
-                  ) : (
-                    <Chip
-                      label="Chưa phân công"
-                      size="small"
-                      color="warning"
-                      variant="outlined"
-                    />
-                  )}
-                </TableCell>
-                <TableCell align="center">
-                  <Chip
-                    label={classItem.students?.length || 0}
-                    color={
-                      classItem.students?.length > 0 ? "success" : "default"
-                    }
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell align="right">
-                  <Box display="flex" justifyContent="flex-end">
-                    <Tooltip title="Sửa lớp">
-                      <IconButton
-                        color="primary"
-                        onClick={() => openDialog("edit", classItem)}
-                        size="small"
-                        sx={{ mx: 0.5 }}
-                      >
-                        <Edit fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Xóa lớp">
-                      <IconButton
-                        color="error"
-                        onClick={() => openDeleteDialog(classItem)}
-                        size="small"
-                        sx={{ mx: 0.5 }}
-                      >
-                        <Delete fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Quản lý sinh viên Lớp Chính">
-                      <IconButton
-                        color="info"
-                        onClick={() => openStudentApproval(classItem)}
-                        size="small"
-                        sx={{ mx: 0.5 }}
-                      >
-                        <People fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
-                </TableCell>
-              </TableRow>
-            ))
+                  </TableCell>
+                </TableRow>
+              )
+            )
           )}
         </TableBody>
       </Table>
@@ -1406,11 +1590,11 @@ const ClassesPage = () => {
           </Grid>
           <Grid item xs={12} sm={6}>
             <TextField
-              name="code"
+              name="class_code"
               label="Mã lớp"
               fullWidth
               required
-              value={mainClassForm.code}
+              value={mainClassForm.class_code}
               onChange={handleMainClassFormChange}
               error={formErrors.main.code}
               helperText={
@@ -1422,12 +1606,35 @@ const ClassesPage = () => {
             />
           </Grid>
           <Grid item xs={12} sm={6}>
-            <FormControl fullWidth>
+            <FormControl
+              fullWidth
+              error={formErrors.main.selected_department_id}
+            >
               <InputLabel>Khoa</InputLabel>
               <Select
-                name="department_id"
-                value={mainClassForm.department_id}
-                onChange={handleMainClassFormChange}
+                name="selected_department_id"
+                value={mainClassForm.selected_department_id}
+                onChange={async (e) => {
+                  const newDeptId = e.target.value;
+                  setMainClassForm((prev) => ({
+                    ...prev,
+                    selected_department_id: newDeptId,
+                    major_id: "", // Reset major when department changes
+                  }));
+                  // setFilteredMajors([]); // Removed, loadMajorsByDepartment or explicit clear below will handle
+                  if (newDeptId) {
+                    await loadMajorsByDepartment(newDeptId);
+                  } else {
+                    setFilteredMajors([]); // Explicitly clear if no department is selected
+                  }
+                  // Validate again if needed, or on submit
+                  if (formErrors.main.selected_department_id && newDeptId) {
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      main: { ...prev.main, selected_department_id: false },
+                    }));
+                  }
+                }}
                 label="Khoa"
               >
                 {departments.map((dept) => (
@@ -1436,6 +1643,59 @@ const ClassesPage = () => {
                   </MenuItem>
                 ))}
               </Select>
+              {formErrors.main.selected_department_id && (
+                <FormHelperText>Vui lòng chọn khoa</FormHelperText>
+              )}
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <FormControl fullWidth error={formErrors.main.major_id}>
+              <InputLabel>Ngành</InputLabel>
+              <Select
+                name="major_id"
+                value={mainClassForm.major_id}
+                onChange={(e) => {
+                  handleMainClassFormChange(e);
+                  // Validate again if needed, or on submit
+                  if (formErrors.main.major_id && e.target.value) {
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      main: { ...prev.main, major_id: false },
+                    }));
+                  }
+                }}
+                label="Ngành"
+                disabled={
+                  !mainClassForm.selected_department_id ||
+                  isLoadingMajors ||
+                  filteredMajors.length === 0
+                }
+              >
+                <MenuItem value="">
+                  <em>
+                    {!mainClassForm.selected_department_id
+                      ? "Vui lòng chọn khoa trước"
+                      : isLoadingMajors
+                      ? "Đang tải ngành..."
+                      : "Chọn Ngành"}
+                  </em>
+                </MenuItem>
+                {filteredMajors.map((major) => (
+                  <MenuItem key={major._id} value={major._id}>
+                    {major.name} ({major.code})
+                  </MenuItem>
+                ))}
+              </Select>
+              {formErrors.main.major_id && (
+                <FormHelperText>Vui lòng chọn ngành</FormHelperText>
+              )}
+              {mainClassForm.selected_department_id &&
+                filteredMajors.length === 0 &&
+                !isLoadingMajors && (
+                  <FormHelperText>
+                    Không có ngành nào thuộc khoa đã chọn.
+                  </FormHelperText>
+                )}
             </FormControl>
           </Grid>
           <Grid item xs={12} sm={6}>
@@ -1475,60 +1735,33 @@ const ClassesPage = () => {
               )}
             />
           </Grid>
-          <Grid item xs={12}>
-            <Autocomplete
-              multiple
-              options={students}
-              getOptionLabel={(option) =>
-                `${option.full_name} (${
-                  option.school_info?.student_id || option.email
-                })`
-              }
-              value={students.filter((student) =>
-                mainClassForm.students.includes(student._id)
-              )}
-              onChange={handleStudentSelection}
-              filterSelectedOptions
-              autoHighlight
-              disableCloseOnSelect
-              limitTags={3}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Chọn sinh viên"
-                  placeholder="Tìm sinh viên theo tên hoặc mã sinh viên"
-                  helperText={`Đã chọn ${mainClassForm.students.length} sinh viên`}
-                />
-              )}
-              renderTags={(value, getTagProps) =>
-                value.map((option, index) => (
-                  <Chip
-                    label={`${option.full_name} (${
-                      option.school_info?.student_id || option.email
-                    })`}
-                    {...getTagProps({ index })}
-                    key={option._id}
-                    size="small"
-                  />
-                ))
-              }
-              renderOption={(props, option, { selected }) => (
-                <li {...props}>
-                  <Box sx={{ display: "flex", flexDirection: "column" }}>
-                    <Typography variant="body1">{option.full_name}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {option.school_info?.student_id || option.email}
-                    </Typography>
-                  </Box>
-                </li>
-              )}
-              sx={{ width: 200 }}
-              isOptionEqualToValue={(option, value) =>
-                option._id === value._id ||
-                (option.school_info?.student_id || option.email) ===
-                  (value.school_info?.student_id || value.email)
-              }
+          <Grid item xs={12} sm={6}>
+            <TextField
+              name="year_start"
+              label="Năm bắt đầu"
+              type="number"
+              fullWidth
+              value={mainClassForm.year_start}
+              onChange={handleMainClassFormChange}
+              helperText="Năm học bắt đầu (VD: 2021)"
             />
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <TextField
+              name="year_end"
+              label="Năm kết thúc"
+              type="number"
+              fullWidth
+              value={mainClassForm.year_end}
+              onChange={handleMainClassFormChange}
+              helperText="Năm học dự kiến kết thúc (VD: 2025)"
+            />
+          </Grid>
+          <Grid item xs={12}>
+            <FormHelperText sx={{ mt: 1, fontStyle: "italic" }}>
+              Lưu ý: Sinh viên sẽ do giáo viên chủ nhiệm quản lý và thêm vào lớp
+              sau khi lớp được tạo và giáo viên được phân công.
+            </FormHelperText>
           </Grid>
         </Grid>
       </DialogContent>
@@ -1546,9 +1779,20 @@ const ClassesPage = () => {
           onClick={handleFormSubmit}
           variant="contained"
           color="primary"
-          disabled={!mainClassForm.name || !mainClassForm.code}
+          disabled={
+            isLoading ||
+            !mainClassForm.name ||
+            !mainClassForm.class_code ||
+            !mainClassForm.major_id
+          } // Added major_id to disable condition
         >
-          {dialogMode === "create" ? "Tạo mới" : "Cập nhật"}
+          {isLoading ? (
+            <CircularProgress size={24} color="inherit" />
+          ) : dialogMode === "create" ? (
+            "Tạo mới"
+          ) : (
+            "Cập nhật"
+          )}
         </Button>
       </DialogActions>
     </Dialog>
@@ -1610,6 +1854,7 @@ const ClassesPage = () => {
                 value={teachingClassForm.subject_id}
                 onChange={handleTeachingClassFormChange}
                 label="Môn học"
+                disabled={isSubjectSelectionDisabled}
               >
                 {subjects.map((subject) => (
                   <MenuItem key={subject._id} value={subject._id}>
@@ -1617,8 +1862,14 @@ const ClassesPage = () => {
                   </MenuItem>
                 ))}
               </Select>
-              {formErrors.teaching.subject_id && (
-                <FormHelperText>Vui lòng chọn môn học</FormHelperText>
+              {formErrors.teaching.subject_id &&
+                !isSubjectSelectionDisabled && (
+                  <FormHelperText>Vui lòng chọn môn học</FormHelperText>
+                )}
+              {isSubjectSelectionDisabled && (
+                <FormHelperText error>
+                  Không thể chọn/thay đổi môn học cho học kỳ đã kết thúc.
+                </FormHelperText>
               )}
             </FormControl>
           </Grid>
@@ -1659,7 +1910,7 @@ const ClassesPage = () => {
               )}
             />
           </Grid>
-          <Grid item xs={12}>
+          <Grid item xs={12} sm={12}>
             <FormControl
               fullWidth
               required
@@ -1667,37 +1918,52 @@ const ClassesPage = () => {
             >
               <InputLabel>Học kỳ</InputLabel>
               <Select
-                name="semester"
+                name="semester_id"
                 value={teachingClassForm.semester_id}
                 onChange={handleTeachingClassFormChange}
                 label="Học kỳ"
+                disabled={isSemesterSelectionDisabled}
               >
-                <MenuItem value="">Tất cả</MenuItem>
+                <MenuItem value="">
+                  <em>Không chọn</em>
+                </MenuItem>
                 {semesters.map((semester) => (
                   <MenuItem key={semester._id} value={semester._id}>
                     {semester.name} ({semester.year})
                   </MenuItem>
                 ))}
               </Select>
-              {formErrors.teaching.semester_id && (
-                <FormHelperText>Vui lòng chọn học kỳ</FormHelperText>
+              {formErrors.teaching.semester_id &&
+                !isSemesterSelectionDisabled && (
+                  <FormHelperText>Vui lòng chọn học kỳ</FormHelperText>
+                )}
+              {isSemesterSelectionDisabled && (
+                <FormHelperText error>
+                  Không thể thay đổi học kỳ vì lớp học này thuộc về một học kỳ
+                  đã kết thúc.
+                </FormHelperText>
               )}
-              {!formErrors.teaching.semester_id &&
+              {/* Hiển thị thông tin thời gian của học kỳ đã chọn */}
+              {!isSemesterSelectionDisabled &&
                 teachingClassForm.semester_id &&
                 (() => {
-                  const selectedSemester = semesters.find(
-                    (sem) => sem._id === teachingClassForm.semester_id
+                  const selectedSemesterInfo = semesters.find(
+                    (s) => s._id === teachingClassForm.semester_id
                   );
-                  if (selectedSemester) {
+                  if (
+                    selectedSemesterInfo &&
+                    selectedSemesterInfo.start_date &&
+                    selectedSemesterInfo.end_date
+                  ) {
                     const formatDate = (dateString) => {
                       const date = new Date(dateString);
                       return date.toLocaleDateString("vi-VN");
                     };
                     return (
-                      <FormHelperText>
-                        Lưu ý: Thời gian học kỳ:{" "}
-                        {formatDate(selectedSemester.start_date)} -{" "}
-                        {formatDate(selectedSemester.end_date)}
+                      <FormHelperText sx={{ color: "text.secondary", mt: 0.5 }}>
+                        Thời gian học kỳ:{" "}
+                        {formatDate(selectedSemesterInfo.start_date)} -{" "}
+                        {formatDate(selectedSemesterInfo.end_date)}
                       </FormHelperText>
                     );
                   }
@@ -1738,75 +2004,15 @@ const ClassesPage = () => {
               )}
             />
             <FormHelperText>
-              Liên kết với lớp chính. Sinh viên từ mọi lớp đều có thể tham gia
-              lớp giảng dạy này.
+              Liên kết với lớp chính (không bắt buộc).
             </FormHelperText>
           </Grid>
           <Grid item xs={12}>
-            <Autocomplete
-              multiple
-              options={students}
-              getOptionLabel={(option) =>
-                `${option.full_name} (${
-                  option.school_info?.student_id || option.email
-                })`
-              }
-              value={students.filter((student) =>
-                teachingClassForm.selected_students.includes(student._id)
-              )}
-              onChange={handleStudentSelection}
-              filterSelectedOptions
-              autoHighlight
-              disableCloseOnSelect
-              limitTags={3}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Chọn sinh viên"
-                  placeholder="Tìm sinh viên theo tên hoặc mã sinh viên"
-                  helperText={`Đã chọn ${teachingClassForm.selected_students.length} sinh viên`}
-                />
-              )}
-              renderTags={(value, getTagProps) =>
-                value.map((option, index) => (
-                  <Chip
-                    label={`${option.full_name} (${
-                      option.school_info?.student_id || option.email
-                    })`}
-                    {...getTagProps({ index })}
-                    key={option._id}
-                    size="small"
-                  />
-                ))
-              }
-              renderOption={(props, option, { selected }) => (
-                <li {...props}>
-                  <Box sx={{ display: "flex", flexDirection: "column" }}>
-                    <Typography variant="body1">{option.full_name}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {option.school_info?.student_id || option.email}
-                    </Typography>
-                  </Box>
-                </li>
-              )}
-              sx={{ width: 200 }}
-              isOptionEqualToValue={(option, value) =>
-                option._id === value._id ||
-                (option.school_info?.student_id || option.email) ===
-                  (value.school_info?.student_id || value.email)
-              }
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              name="description"
-              label="Mô tả"
-              fullWidth
-              multiline
-              rows={3}
-              value={teachingClassForm.description}
-              onChange={handleTeachingClassFormChange}
-            />
+            <Alert severity="info" sx={{ mt: 1 }}>
+              <strong>Lưu ý:</strong> Sau khi tạo lớp thành công, giáo viên cần
+              vào mục 'Chỉnh sửa lớp học' (biểu tượng cây bút) để thiết lập lịch
+              học chi tiết, quản lý danh sách sinh viên và các thông tin khác.
+            </Alert>
           </Grid>
         </Grid>
       </DialogContent>
@@ -1827,8 +2033,8 @@ const ClassesPage = () => {
           disabled={
             !teachingClassForm.class_name ||
             !teachingClassForm.class_code ||
-            !teachingClassForm.subject_id ||
-            !teachingClassForm.semester_id
+            (!isSubjectSelectionDisabled && !teachingClassForm.subject_id) || // Chỉ kiểm tra subject_id nếu không bị disable
+            (!isSemesterSelectionDisabled && !teachingClassForm.semester_id) // Chỉ kiểm tra semester_id nếu không bị disable
           }
         >
           {dialogMode === "create" ? "Tạo mới" : "Cập nhật"}
@@ -2392,13 +2598,13 @@ const ClassesPage = () => {
 
   return (
     <Box>
+      {" "}
+      {/* Thẻ Box bao ngoài cùng */}
+      {/* ... (Nội dung Typography, renderStatCards, Paper với Tabs, Paper với search và filter) ... */}
       <Typography variant="h5" gutterBottom>
         Quản lý lớp học
       </Typography>
-
-      {/* Thống kê */}
       {renderStatCards()}
-
       <Paper sx={{ mb: 3 }}>
         <Tabs
           value={tabValue}
@@ -2411,8 +2617,8 @@ const ClassesPage = () => {
           <Tab label="Lớp giảng dạy" icon={<People />} iconPosition="start" />
         </Tabs>
       </Paper>
-
       <Paper sx={{ p: 2, mb: 3 }}>
+        {/* ... (Box chứa TextField tìm kiếm và các Button) ... */}
         <Box
           display="flex"
           flexDirection={{ xs: "column", sm: "row" }}
@@ -2478,7 +2684,6 @@ const ClassesPage = () => {
             </Typography>
             <Grid container spacing={2}>
               {tabValue === 0 ? (
-                // Bộ lọc cho lớp chính
                 <>
                   <Grid item xs={12} sm={6} md={3}>
                     <FormControl fullWidth size="small">
@@ -2516,15 +2721,28 @@ const ClassesPage = () => {
                       </Select>
                     </FormControl>
                   </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <TextField
+                      fullWidth
+                      label="Năm bắt đầu"
+                      name="year_start"
+                      type="number"
+                      size="small"
+                      value={filterOptions.year_start}
+                      onChange={handleFilterChange}
+                      InputLabelProps={{
+                        shrink: true,
+                      }}
+                    />
+                  </Grid>
                 </>
               ) : (
-                // Bộ lọc cho lớp giảng dạy
                 <>
                   <Grid item xs={12} sm={6} md={3}>
                     <FormControl fullWidth size="small">
                       <InputLabel>Môn học</InputLabel>
                       <Select
-                        name="course"
+                        name="course" // Giữ nguyên name="course" cho filterOptions
                         value={filterOptions.course}
                         onChange={handleFilterChange}
                         label="Môn học"
@@ -2560,7 +2778,8 @@ const ClassesPage = () => {
                     <FormControl fullWidth size="small">
                       <InputLabel>Học kỳ</InputLabel>
                       <Select
-                        name="semester"
+                        name="semester" // Đã sửa ở lần trước, giữ nguyên nếu filterOptions.semester_id
+                        // Hoặc name="semester" nếu filterOptions.semester
                         value={filterOptions.semester}
                         onChange={handleFilterChange}
                         label="Học kỳ"
@@ -2580,40 +2799,39 @@ const ClassesPage = () => {
           </Box>
         </Collapse>
       </Paper>
-
-      {/* Hiển thị kết quả hoặc trạng thái trống */}
       {isLoading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
           <CircularProgress />
         </Box>
-      ) : classes.length === 0 &&
+      ) : // Điều kiện kiểm tra empty state cho cả 2 tab
+      tabValue === 0 &&
+        mainClasses.length === 0 &&
         searchTerm === "" &&
         !filterOptions.department &&
         !filterOptions.teacher &&
+        !filterOptions.year_start ? (
+        renderEmptyState()
+      ) : tabValue === 1 &&
+        classes.length === 0 &&
+        searchTerm === "" &&
         !filterOptions.course &&
+        !filterOptions.teacher &&
         !filterOptions.semester ? (
         renderEmptyState()
-      ) : tabValue === 0 ? (
+      ) : // Hiển thị bảng tương ứng
+      tabValue === 0 ? (
         renderMainClassesTable()
       ) : (
         renderTeachingClassesTable()
       )}
-
-      {/* Dialog forms */}
       {tabValue === 0
         ? renderMainClassFormDialog()
         : renderTeachingClassFormDialog()}
-
-      {/* Dialog xem sinh viên lớp giảng dạy */}
       {renderViewTeachingClassStudentsDialog()}
-
-      {/* Dialog xem sinh viên lớp chính */}
       {renderViewMainClassStudentsDialog()}
-
-      {/* Dialog xác nhận xóa */}
       <Dialog
         open={deleteDialog.open}
-        onClose={() => setDeleteDialog({ ...deleteDialog, open: false })}
+        onClose={() => setDeleteDialog({ open: false, item: null })}
       >
         <DialogTitle>Xác nhận xóa</DialogTitle>
         <DialogContent>
@@ -2625,7 +2843,7 @@ const ClassesPage = () => {
         </DialogContent>
         <DialogActions>
           <Button
-            onClick={() => setDeleteDialog({ ...deleteDialog, open: false })}
+            onClick={() => setDeleteDialog({ open: false, item: null })}
             color="inherit"
           >
             Hủy

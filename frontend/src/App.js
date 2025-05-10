@@ -36,6 +36,7 @@ import AdminDepartmentsPage from "./pages/admin/DepartmentsPage";
 import AdminFacilitiesPage from "./pages/admin/FacilitiesPage";
 import AdminSemestersPage from "./pages/admin/SemestersPage";
 import AdminSubjectsPage from "./pages/admin/SubjectsPage";
+import MajorsPage from "./pages/admin/MajorsPage";
 import TestPage from "./pages/admin/TestPage";
 
 // Layouts
@@ -204,6 +205,7 @@ const App = () => {
           <Route path="users" element={<AdminUsersPage />} />
           <Route path="classes" element={<AdminClassesPage />} />
           <Route path="departments" element={<AdminDepartmentsPage />} />
+          <Route path="majors" element={<MajorsPage />} />
           <Route path="semesters" element={<AdminSemestersPage />} />
           <Route path="subjects" element={<AdminSubjectsPage />} />
           <Route path="facilities" element={<AdminFacilitiesPage />} />

@@ -8,11 +8,11 @@ const mongoose = require("mongoose");
  */
 exports.getAllSubjects = async (req, res) => {
   try {
-    const { department, status } = req.query;
+    const { department_id, status } = req.query;
     const query = {};
 
-    if (department) {
-      query.department = department;
+    if (department_id) {
+      query.department_id = department_id;
     }
 
     if (status) {
@@ -20,7 +20,7 @@ exports.getAllSubjects = async (req, res) => {
     }
 
     const subjects = await Subject.find(query)
-      .populate("department", "name code")
+      .populate("department_id", "name code")
       .sort({ name: 1 });
 
     res.status(200).json({
@@ -46,7 +46,7 @@ exports.getAllSubjects = async (req, res) => {
 exports.getSubjectById = async (req, res) => {
   try {
     const subject = await Subject.findById(req.params.id).populate(
-      "department",
+      "department_id",
       "name code"
     );
 
@@ -78,7 +78,8 @@ exports.getSubjectById = async (req, res) => {
  */
 exports.createSubject = async (req, res) => {
   try {
-    const { name, code, credits, department, description, status } = req.body;
+    const { name, code, credits, department_id, description, status } =
+      req.body;
 
     // Kiểm tra mã môn học đã tồn tại chưa
     const existingSubject = await Subject.findOne({ code });
@@ -90,8 +91,8 @@ exports.createSubject = async (req, res) => {
     }
 
     // Kiểm tra department tồn tại (nếu có)
-    if (department) {
-      const dept = await Department.findById(department);
+    if (department_id) {
+      const dept = await Department.findById(department_id);
       if (!dept) {
         return res.status(404).json({
           success: false,
@@ -104,7 +105,7 @@ exports.createSubject = async (req, res) => {
       name,
       code,
       credits: credits || 3,
-      department,
+      department_id,
       description,
       status: status || "đang dạy",
     });
@@ -131,7 +132,8 @@ exports.createSubject = async (req, res) => {
  */
 exports.updateSubject = async (req, res) => {
   try {
-    const { name, code, credits, department, description, status } = req.body;
+    const { name, code, credits, department_id, description, status } =
+      req.body;
     const subjectId = req.params.id;
 
     // Kiểm tra mã môn học đã tồn tại chưa (trừ môn học hiện tại)
@@ -150,8 +152,8 @@ exports.updateSubject = async (req, res) => {
     }
 
     // Kiểm tra department tồn tại (nếu có)
-    if (department) {
-      const dept = await Department.findById(department);
+    if (department_id) {
+      const dept = await Department.findById(department_id);
       if (!dept) {
         return res.status(404).json({
           success: false,
@@ -166,7 +168,7 @@ exports.updateSubject = async (req, res) => {
         name,
         code,
         credits,
-        department,
+        department_id,
         description,
         status,
         updated_at: Date.now(),
@@ -244,9 +246,16 @@ exports.getSubjectsByDepartment = async (req, res) => {
       });
     }
 
-    const subjects = await Subject.find({ department: departmentId }).sort({
+    const subjects = await Subject.find({ department_id: departmentId }).sort({
       name: 1,
     });
+
+    if (!subjects || subjects.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy môn học nào thuộc khoa này",
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -254,10 +263,10 @@ exports.getSubjectsByDepartment = async (req, res) => {
       data: subjects,
     });
   } catch (error) {
-    console.error("Lỗi khi lấy danh sách môn học theo khoa:", error);
+    console.error("Lỗi khi lấy môn học theo khoa:", error);
     res.status(500).json({
       success: false,
-      message: "Lỗi server khi lấy danh sách môn học theo khoa",
+      message: "Lỗi server khi lấy môn học theo khoa",
       error: error.message,
     });
   }

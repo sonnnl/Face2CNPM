@@ -21,7 +21,10 @@ exports.getAllSemesters = async (req, res) => {
     const query = {};
 
     if (search) {
-      query.name = { $regex: search, $options: "i" };
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { academic_year: { $regex: search, $options: "i" } },
+      ];
     }
 
     if (year) {
@@ -33,23 +36,30 @@ exports.getAllSemesters = async (req, res) => {
     }
 
     const sortOptions = {};
-    if (sort === "name") {
-      sortOptions.name = 1;
-    } else if (sort === "year") {
-      sortOptions.year = 1;
-    } else if (sort === "start_date") {
-      sortOptions.start_date = 1;
-    } else if (sort === "-start_date") {
-      sortOptions.start_date = -1;
+    if (sort) {
+      if (sort.startsWith("-")) {
+        sortOptions[sort.substring(1)] = -1;
+      } else {
+        sortOptions[sort] = 1;
+      }
     } else {
-      sortOptions.createdAt = -1;
+      sortOptions.start_date = -1;
     }
 
     const total = await Semester.countDocuments(query);
-    const semesters = await Semester.find(query)
+    const semestersFromDB = await Semester.find(query)
       .skip((page - 1) * limit)
       .limit(limit)
       .sort(sortOptions);
+
+    const semesters = semestersFromDB.map((sem) => {
+      const semObject = sem.toObject();
+      semObject.calculated_status = calculateSemesterStatus(
+        semObject.start_date,
+        semObject.end_date
+      );
+      return semObject;
+    });
 
     res.status(200).json({
       success: true,
@@ -74,14 +84,20 @@ exports.getAllSemesters = async (req, res) => {
 // @access  Private
 exports.getSemesterById = async (req, res) => {
   try {
-    const semester = await Semester.findById(req.params.id);
+    const semesterFromDB = await Semester.findById(req.params.id);
 
-    if (!semester) {
+    if (!semesterFromDB) {
       return res.status(404).json({
         success: false,
         message: "Không tìm thấy học kỳ",
       });
     }
+
+    const semester = semesterFromDB.toObject();
+    semester.calculated_status = calculateSemesterStatus(
+      semester.start_date,
+      semester.end_date
+    );
 
     res.status(200).json({
       success: true,
@@ -136,7 +152,6 @@ exports.createSemester = async (req, res) => {
       end_date,
       year,
       is_current,
-      status,
       semester_number,
       academic_year,
       registration_start_date,
@@ -187,14 +202,20 @@ exports.createSemester = async (req, res) => {
         academic_year ||
         getAcademicYearByDate(end_date, year, semester_number || 1),
       is_current: is_current || false,
-      status: status || "chưa bắt đầu",
       registration_start_date: regStartDate,
       registration_end_date: regEndDate,
     });
 
+    // Tính toán trạng thái cho học kỳ vừa tạo để trả về response chính xác
+    const createdSemesterObject = semester.toObject();
+    createdSemesterObject.calculated_status = calculateSemesterStatus(
+      createdSemesterObject.start_date,
+      createdSemesterObject.end_date
+    );
+
     res.status(201).json({
       success: true,
-      data: semester,
+      data: createdSemesterObject,
       message: "Tạo học kỳ thành công",
     });
   } catch (error) {
@@ -214,14 +235,25 @@ function getAcademicYearByDate(endDateStr, year, semesterNumber = null) {
   const endDate = new Date(endDateStr);
   const endMonth = endDate.getMonth() + 1; // getMonth() trả về 0-11
 
-  // Nếu tháng kết thúc < 9 (trước tháng 9), thì năm học là (year-1)-year
-  // Tương ứng với học kỳ 2 (tháng 1-6) và học kỳ hè (tháng 7-8)
-  if (endMonth < 9) {
-    return `${year - 1}-${year}`;
+  // Logic này có thể cần xem xét lại cho phù hợp với quy ước năm học của trường
+  // Ví dụ: Kỳ 1 (Fall): tháng 9-12 -> năm học year - year+1
+  // Kỳ 2 (Spring): tháng 1-5 -> năm học year-1 - year
+  // Kỳ hè (Summer): tháng 6-8 -> năm học year-1 - year
+  if (semesterNumber === 1) {
+    // Thường là kỳ Thu
+    return `${year}-${parseInt(year) + 1}`;
+  } else if (semesterNumber === 2 || semesterNumber === 3) {
+    // Thường là kỳ Xuân hoặc Hè
+    return `${parseInt(year) - 1}-${year}`;
+  }
+
+  // Fallback logic nếu không có semester_number hoặc logic trên không khớp
+  if (endMonth < 8) {
+    // Trước tháng 8 (bao gồm kỳ Xuân, Hè)
+    return `${parseInt(year) - 1}-${year}`;
   } else {
-    // Ngược lại năm học là year-(year+1)
-    // Tương ứng với học kỳ 1 (tháng 9-12)
-    return `${year}-${year + 1}`;
+    // Từ tháng 8 trở đi (bao gồm kỳ Thu)
+    return `${year}-${parseInt(year) + 1}`;
   }
 }
 
@@ -236,7 +268,6 @@ exports.updateSemester = async (req, res) => {
       end_date,
       year,
       is_current,
-      status,
       semester_number,
       academic_year,
       registration_start_date,
@@ -277,37 +308,54 @@ exports.updateSemester = async (req, res) => {
       end_date,
       year,
       is_current,
-      status,
+      semester_number,
+      academic_year:
+        academic_year ||
+        (start_date
+          ? getAcademicYearByDate(end_date, year, semester_number)
+          : undefined),
       registration_start_date,
       registration_end_date,
     };
 
-    if (semester_number) updateData.semester_number = semester_number;
-    if (academic_year) {
-      updateData.academic_year = academic_year;
-    } else if (end_date && year) {
-      updateData.academic_year = getAcademicYearByDate(
-        end_date,
-        year,
-        semester_number
-      );
+    // Chỉ cập nhật is_current nếu nó được truyền vào
+    if (is_current !== undefined) {
+      updateData.is_current = is_current;
+      if (is_current) {
+        await Semester.updateMany(
+          { _id: { $ne: semesterId } },
+          { is_current: false }
+        );
+      }
     }
 
-    const semester = await Semester.findByIdAndUpdate(semesterId, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    // Loại bỏ các trường undefined để tránh ghi đè giá trị hiện có bằng undefined
+    Object.keys(updateData).forEach(
+      (key) => updateData[key] === undefined && delete updateData[key]
+    );
 
-    if (!semester) {
+    const updatedSemesterFromDB = await Semester.findByIdAndUpdate(
+      semesterId,
+      updateData,
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedSemesterFromDB) {
       return res.status(404).json({
         success: false,
         message: "Không tìm thấy học kỳ",
       });
     }
 
+    const updatedSemester = updatedSemesterFromDB.toObject();
+    updatedSemester.calculated_status = calculateSemesterStatus(
+      updatedSemester.start_date,
+      updatedSemester.end_date
+    );
+
     res.status(200).json({
       success: true,
-      data: semester,
+      data: updatedSemester,
       message: "Cập nhật học kỳ thành công",
     });
   } catch (error) {
@@ -554,5 +602,23 @@ exports.getRegistrationStatus = async (req, res) => {
       message: "Lỗi server khi kiểm tra thời gian đăng ký môn học",
       error: error.message,
     });
+  }
+};
+
+// Hàm helper tính toán trạng thái học kỳ
+const calculateSemesterStatus = (startDate, endDate) => {
+  const now = new Date();
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  // Đặt giờ của end về cuối ngày để so sánh chính xác
+  end.setHours(23, 59, 59, 999);
+
+  if (now < start) {
+    return "Chưa bắt đầu";
+  } else if (now >= start && now <= end) {
+    return "Đang diễn ra";
+  } else {
+    return "Đã kết thúc";
   }
 };
